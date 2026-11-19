@@ -9,7 +9,7 @@
   const legacyCardTag = "deye-lcd-8k";
   if (customElements.get(cardTag)) return;
 
-  const version = "Alpha 0.8.21";
+  const version = "Alpha 0.8.22";
   const models = [3, 5, 6, 8, 10, 12, 15, 20, 30, 80, 160];
   const defaultModel = 8;
   const themes = [
@@ -2710,6 +2710,7 @@
     .v-sheet-head{display:flex;justify-content:space-between;align-items:center;gap:10px}
     .v-sheet-head h3{margin:0;font-size:1.05em}
     .v-sheet small{color:#9fb7cc}
+    .v-sheet .v-shared-note{display:block;margin-top:5px;color:#ffe2a0;line-height:1.35}
     .v-sheet .v-help-btn{display:inline-flex;align-items:center;gap:6px;border-radius:20px;border:1.5px solid #f2b632;background:transparent;color:#f2b632;flex:none}
     .v-sheet .v-help-btn span{font-weight:800;font-size:1.15em}
     .v-sheet .v-help-btn[aria-pressed="true"]{background:#f2b632;color:#2a1e05}
@@ -2734,6 +2735,8 @@
 
   const editorViewKey = "deye-lcd-tehnika:editor-menu-view";
   const visualScreen = { w:400, h:268 };
+  // Native fields that are stored under other keys: Gen Start / Grid Start are % (SOC) entities, with volts as an extra.
+  const visualRedirects = { generator_start: "generator_charge_start_soc", grid_start: "grid_charge_start_soc" };
   const visualTitles = {
     battery_mode: pair("Battery mode", "Режим АКБ"), work_mode: pair("Work mode", "Режим роботи"),
     energy_pattern: pair("Energy pattern", "Пріоритет енергії"), grid_frequency: pair("Grid frequency", "Частота мережі"),
@@ -3035,7 +3038,14 @@
       if (/^(generator|grid)_signal$/.test(name) && via("charging_signal")) return "shared";
       if (/^battery_(shutdown|low|restart)$/.test(name) && via(`${name}_voltage`)) return "shared";
       if (/^basic_(year|month|day|hour|minute)$/.test(name) && via("basic_datetime")) return "shared";
+      if (/^(generator|grid)_charge_start_soc$/.test(name) && via(name.replace(/_soc$/, "_voltage"))) return "shared";
       return "empty";
+    }
+
+    visualOptionMatches(name, option, value) {
+      const choices = name === "battery_mode" ? batteryChoices[option] : settingOptions[name]?.[option];
+      if (!choices || !value) return false;
+      return choices.some(choice => optionKey(choice) === optionKey(String(value)));
     }
 
     visualTitle(name, control) {
@@ -3110,15 +3120,17 @@
           return `<span class="v-label" style="${box(control)};justify-content:${control.align === "center" ? "center" : control.align === "end" ? "flex-end" : "flex-start"};font-size:${(control.font * 0.92).toFixed(2)}cqw">${escapeHtml(local(control.label, this.config))}</span>`;
         }
         if (!control.name) return "";
-        const state = control.alias ? "alias" : this.visualState(control.name);
-        if (!["alias", "derived", "locked"].includes(state)) names.add(control.name);
-        const title = this.visualTitle(control.name, control);
+        const bindName = visualRedirects[control.name] ?? control.name;
+        const state = control.alias ? "alias" : this.visualState(bindName);
+        if (!["alias", "derived", "locked"].includes(state)) names.add(bindName);
+        const title = this.visualTitle(bindName, control);
         const text = control.label ? local(control.label, this.config) : title;
-        const value = state === "bound" ? this.visualValue(control.name, control) : "";
+        const value = state === "bound" ? this.visualValue(bindName, control) : "";
         const mark = { bound:"✓", shared:"⇄", empty:"+", alias:"", derived:"", locked:"🔒" }[state];
         let inner;
         if (control.kind === "checkbox" || control.kind === "radio") {
-          const sign = state === "bound" && control.kind === "checkbox" ? (value === "off" ? "" : "✓") : mark;
+          const sign = state !== "bound" ? mark : control.kind === "checkbox" ? (value === "off" ? "" : "✓")
+            : this.visualOptionMatches(bindName, control.option, value) ? "●" : "";
           inner = `<i class="v-box${control.kind === "radio" ? " round" : ""}">${escapeHtml(sign)}</i>${control.compact ? "" : `<b>${escapeHtml(text)}</b>`}`;
         } else if (control.kind === "alarms") {
           inner = `<b>${escapeHtml(t("Alarm log", "Журнал тривог"))} ${mark}</b>`;
@@ -3130,9 +3142,9 @@
           inner = `<b>${escapeHtml(state === "bound" ? `${value || "✓"}${value && control.unit && value !== "—" ? ` ${control.unit}` : ""}` : mark)}</b>`;
         }
         const disabled = ["alias", "derived", "locked"].includes(state);
-        const selected = this.visualField === control.name ? " selected" : "";
+        const selected = this.visualField === bindName ? " selected" : "";
         return `<button type="button" class="v-ctl v-${state} v-${control.kind}${control.compact ? " v-compact" : ""}${selected}" style="${box(control)}"
-          ${disabled ? "disabled" : `data-vfield="${escapeHtml(control.name)}"`} title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}">${inner}</button>`;
+          ${disabled ? "disabled" : `data-vfield="${escapeHtml(bindName)}"`} title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}">${inner}</button>`;
       }).join("");
       const extras = screen.extra.filter(name => this.visualDomains(name).length);
       for (const name of extras) names.add(name);
@@ -3174,7 +3186,9 @@
       const currentEntity = current ? this.hassData?.states?.[current] : null;
       const help = this.visualHelpText(name, control, domains);
       slot.innerHTML = `<section class="v-sheet" aria-label="${escapeHtml(t("Choose an entity", "Вибір сутності"))}">
-        <div class="v-sheet-head"><div><h3>${escapeHtml(title)}</h3><small>${escapeHtml(t("fits: ", "підходять: "))}${escapeHtml(domains.join(" / "))}</small></div>
+        <div class="v-sheet-head"><div><h3>${escapeHtml(title)}</h3><small>${escapeHtml(t("fits: ", "підходять: "))}${escapeHtml(domains.join(" / "))}</small>
+          ${this.visualOptionCount(name) > 1 ? `<small class="v-shared-note">${escapeHtml(t(`One select for all ${this.visualOptionCount(name)} options on the screen — they are filled together; the one matching the entity state is marked ●.`,
+            `Одна сутність select на всі ${this.visualOptionCount(name)} варіанти на екрані — вони заповнюються разом; поточний варіант позначено ●.`))}</small>` : ""}</div>
           <button type="button" class="v-help-btn" data-vhelp aria-pressed="${Boolean(this.visualHelp)}"><span aria-hidden="true">?</span>${escapeHtml(this.visualHelp ? t("Hide", "Сховати") : t("Tip", "Порада"))}</button></div>
         ${this.visualHelp ? `<div class="v-help"><h4>${t("WHAT THIS IS", "ЩО ЦЕ ЗА ПУНКТ")}</h4><p>${escapeHtml(help.what)}</p>
           <h4>${t("NO MATCH? SEARCH FOR", "ЯКЩО НЕМАЄ ЗБІГУ — ШУКАЙТЕ")}</h4><div class="v-terms">${help.terms.map(term => `<button type="button" data-vterm="${escapeHtml(term)}">${escapeHtml(term)}</button>`).join("")}</div>
@@ -3185,6 +3199,11 @@
         <div class="v-list">${this.visualListHtml(name, control, domains)}</div>
         <div class="actions"><button type="button" data-vclose>${t("Close", "Закрити")}</button></div>
       </section>`;
+    }
+
+    visualOptionCount(name) {
+      const screen = settingsMenus.flatMap(menu => menu.pages).find(page => page.controls.some(item => item.name === name));
+      return screen ? screen.controls.filter(item => item.name === name && item.kind === "radio").length : 0;
     }
 
     visualPageControl(name) {
