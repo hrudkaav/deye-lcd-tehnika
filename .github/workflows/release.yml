@@ -1,0 +1,66 @@
+# Automatic release: when deye-lcd-tehnika.js with a new version reaches main,
+# this creates the tag vX.Y.Z and a GitHub release with the card file and the zip archive.
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - deye-lcd-tehnika.js
+      - CHANGELOG.md
+      - docs/README_UA.txt
+      - .github/workflows/release.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read version from the card
+        id: version
+        run: |
+          VERSION=$(grep -oP 'const version = "Alpha \K[0-9]+\.[0-9]+\.[0-9]+' deye-lcd-tehnika.js)
+          if [ -z "$VERSION" ]; then echo "Version not found in deye-lcd-tehnika.js"; exit 1; fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Card version: $VERSION"
+
+      - name: Stop if this version is already released
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "v${{ steps.version.outputs.version }}" > /dev/null 2>&1; then
+            echo "Release v${{ steps.version.outputs.version }} already exists, nothing to do."
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build archive and release notes
+        if: steps.check.outputs.exists == 'false'
+        run: |
+          V=${{ steps.version.outputs.version }}
+          mkdir -p dist
+          cp deye-lcd-tehnika.js docs/README_UA.txt dist/
+          (cd dist && zip -q "Deye_LCD_Tehnika_v$V.zip" deye-lcd-tehnika.js README_UA.txt)
+          # Notes: the CHANGELOG section of this version, up to the next «## » heading.
+          awk -v v="$V" '$0 ~ "^## "v" " {on=1; next} on && /^## / {exit} on {print}' CHANGELOG.md > dist/notes.md
+          printf '\nВстановлення: через HACS (Custom repositories → тип Dashboard) або вручну — файл deye-lcd-tehnika.js нижче.\n' >> dist/notes.md
+          cat dist/notes.md
+
+      - name: Create release
+        if: steps.check.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          V=${{ steps.version.outputs.version }}
+          gh release create "v$V" \
+            --target "$GITHUB_SHA" \
+            --title "Deye · LCD ТЕХНіКА v$V" \
+            --notes-file dist/notes.md \
+            dist/deye-lcd-tehnika.js "dist/Deye_LCD_Tehnika_v$V.zip"
