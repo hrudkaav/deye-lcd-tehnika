@@ -9,7 +9,7 @@
   const legacyCardTag = "deye-lcd-8k";
   if (customElements.get(cardTag)) return;
 
-  const version = "Alpha 0.8.15";
+  const version = "Alpha 0.8.20";
   const models = [3, 5, 6, 8, 10, 12, 15, 20, 30, 80, 160];
   const defaultModel = 8;
   const themes = [
@@ -2630,9 +2630,152 @@
     .choice-row select{margin-top:4px}
     .match-warning{padding:8px 10px;border-radius:8px;background:#5a3d1c;color:#ffe6c4}
     .actions button{max-width:100%;overflow-wrap:anywhere}
+    .view-toggle{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+    .view-toggle span{color:var(--secondary-text-color,#a7bac9);font-size:.88em;margin-right:4px}
+    .view-toggle button{min-height:34px;padding:4px 12px;font-size:.9em}
+    .visual-slot{display:grid;gap:10px;min-width:0}
+    .v-screen{position:relative;border-radius:9px;overflow:hidden;outline:3px solid #f2b632;outline-offset:2px;margin:3px;
+      background:linear-gradient(180deg,#302183 13%,#2d46a2 53%,#157d98 100%);color:#f4faff;container-type:inline-size;font-family:Roboto,Arial,sans-serif;aspect-ratio:350/268}
+    .v-head{display:flex;align-items:center;gap:8px;position:absolute;left:0;right:0;top:0;z-index:2;padding:0 3cqw;height:12.69%;
+      background:repeating-linear-gradient(135deg,#f2b632 0 14px,#e0a21e 14px 28px);color:#2a1e05}
+    .v-head b{font-size:4.6cqw;white-space:nowrap}
+    .v-head span{font-size:3.2cqw;opacity:.85;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .v-head em{margin-left:auto;font-style:normal;font-weight:700;font-size:2.6cqw;padding:.6cqw 1.6cqw;border-radius:4px;background:#2a1e05;color:#f2b632;white-space:nowrap}
+    .v-screen[data-readonly="true"] .v-head{background:repeating-linear-gradient(135deg,#9aa6b2 0 14px,#87939f 14px 28px)}
+    .v-screen[data-readonly="true"] .v-head em{color:#d7dee5}
+    .v-body{position:absolute;inset:0}
+    .v-label,.v-line,.v-ctl{position:absolute}
+    .v-label{display:flex;align-items:center;line-height:1.05;color:#f4faff;overflow:hidden;pointer-events:none;font-weight:500}
+    .v-line{background:#aeedfc66;height:1px!important}
+    .v-ctl{display:flex;align-items:center;justify-content:center;gap:1.2cqw;min-height:0;padding:0 1cqw;border-radius:3px;
+      font-size:3cqw;line-height:1;overflow:hidden;white-space:nowrap;color:#12284e;background:#def4ed;border:1px solid #aeedfc}
+    .v-ctl b{font-weight:600;overflow:hidden;text-overflow:ellipsis}
+    .v-ctl.v-checkbox,.v-ctl.v-radio{justify-content:flex-start;background:#08469744;color:#f4faff;border-color:#aeedfc88}
+    .v-ctl.v-compact{justify-content:center}
+    .v-box{flex:none;display:grid;place-items:center;width:4.4cqw;height:4.4cqw;font-style:normal;font-weight:800;font-size:3cqw;
+      border:1px solid #aeedfc;background:#def4ed;color:#12284e;border-radius:2px}
+    .v-box.round{border-radius:50%}
+    .v-ctl.v-bound{box-shadow:inset 3px 0 0 #2fbf6a}
+    .v-ctl.v-shared{border:1.5px solid #8fd3ff;background:#cfe7ff;box-shadow:inset 3px 0 0 #4aa3ff}
+    .v-ctl.v-checkbox.v-shared,.v-ctl.v-radio.v-shared{background:#4aa3ff33}
+    .v-ctl.v-empty{border:2px dashed #f2b632;background:#f2b6321f;color:#f2b632;font-size:4cqw}
+    .v-ctl.v-checkbox.v-empty,.v-ctl.v-radio.v-empty{font-size:3cqw;color:#ffe2a0}
+    .v-ctl.v-empty .v-box{background:transparent;border:1.5px dashed #f2b632;color:#f2b632}
+    .v-ctl.v-alias,.v-ctl.v-derived{border:1px solid #aeedfc66;color:#cfe7f5;background:repeating-linear-gradient(135deg,#ffffff10 0 4px,transparent 4px 8px);font-size:2.6cqw}
+    .v-ctl.v-locked{border:1px solid #8b949c;background:#55606a;color:#c9d0d6;filter:grayscale(1)}
+    .v-ctl:disabled{opacity:1}
+    .v-ctl.selected{outline:3px solid #ffdf84;outline-offset:1px;z-index:1}
+    .v-ctl:hover:enabled{filter:brightness(1.12);border-color:#ffdf84}
+    .v-ctl.v-alarms{align-items:flex-start;padding-top:2cqw}
+    .v-progress,.v-legend{margin:0;color:var(--secondary-text-color,#a7bac9);font-size:.9em}
+    .v-legend{display:flex;flex-wrap:wrap;gap:6px 14px}
+    .v-legend span{display:inline-flex;align-items:center;gap:6px}
+    .v-dot{display:inline-block;width:12px;height:12px;border-radius:3px}
+    .v-dot.bound{background:#def4ed;box-shadow:inset 3px 0 0 #2fbf6a}
+    .v-dot.empty{border:2px dashed #f2b632}
+    .v-dot.shared{background:#cfe7ff;box-shadow:inset 3px 0 0 #4aa3ff}
+    .v-extra{display:grid;gap:6px}
+    .v-extra h3{margin:0;font-size:.95em}
+    .v-extra>div{display:flex;flex-wrap:wrap;gap:6px}
+    .v-chip{display:inline-flex;align-items:center;gap:6px;min-height:36px;padding:4px 10px;font-size:.88em;text-align:left}
+    .v-chip i{font-style:normal;font-weight:800}
+    .v-chip.v-empty{border:2px dashed #f2b632}
+    .v-chip.v-empty i{color:#f2b632}
+    .v-chip.v-bound{box-shadow:inset 4px 0 0 #2fbf6a}
+    .v-chip.v-shared{box-shadow:inset 4px 0 0 #4aa3ff}
+    .v-chip.selected{outline:3px solid #ffdf84}
+    .v-sheet{display:grid;gap:9px;padding:13px;border-radius:10px;background:#172b40;color:#eaf3fb;border-top:3px solid #f2b632}
+    .v-sheet button{background:#20384f;border-color:#3c5a76;color:#eaf3fb}
+    .v-sheet-head{display:flex;justify-content:space-between;align-items:center;gap:10px}
+    .v-sheet-head h3{margin:0;font-size:1.05em}
+    .v-sheet small{color:#9fb7cc}
+    .v-sheet .v-help-btn{display:inline-flex;align-items:center;gap:6px;border-radius:20px;border:1.5px solid #f2b632;background:transparent;color:#f2b632;flex:none}
+    .v-sheet .v-help-btn span{font-weight:800;font-size:1.15em}
+    .v-sheet .v-help-btn[aria-pressed="true"]{background:#f2b632;color:#2a1e05}
+    .v-help{display:grid;gap:7px;padding:11px 13px;border-radius:9px;background:#0f2236;border:1px solid #f2b63299;border-left:4px solid #f2b632}
+    .v-help h4,.v-list h4{margin:0;color:#f2b632;font-size:.75em;letter-spacing:.03em}
+    .v-help p{line-height:1.45;font-size:.92em}
+    .v-help .v-tip{color:#b8cde0;font-size:.86em}
+    .v-terms{display:flex;flex-wrap:wrap;gap:6px}
+    .v-sheet .v-terms button{min-height:30px;padding:3px 10px;border-radius:14px;background:#24405c;border-color:#24405c;font-family:monospace;font-size:.85em}
+    .v-current{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;background:#1d3a2b;border:1px solid #2fbf6a}
+    .v-current span,.v-pick span{display:grid;gap:2px;min-width:0;overflow-wrap:anywhere;text-align:left}
+    .v-sheet input[type=search]{width:100%;padding:9px 12px;border-radius:8px;border:1px solid #3c5a76;background:#0f1f30;color:#eaf3fb;font:inherit}
+    .v-list{display:flex;flex-direction:column;gap:6px;max-height:min(52vh,400px);overflow:auto;padding:2px}
+    .v-list>*{flex:none}
+    .v-sheet .v-pick{display:flex;justify-content:space-between;align-items:center;gap:10px;min-height:44px;text-align:left}
+    .v-sheet .v-pick em{font-style:normal;font-size:.82em;color:#b9d79a;flex:none;max-width:35%;overflow:hidden;text-overflow:ellipsis}
+    .v-sheet .v-pick.current{border-color:#2fbf6a}
+    .v-empty{color:#9fb7cc;font-size:.9em}
     @container (max-width:560px){.workspace{grid-template-columns:minmax(0,1fr)}.side{grid-template-columns:repeat(2,minmax(0,1fr))}}
     @container (max-width:340px){.tabs button,.pages button{font-size:.88em;padding:6px}.pane{padding:9px}}
   `;
+
+  const editorViewKey = "deye-lcd-tehnika:editor-menu-view";
+  const visualScreen = { w:350, h:268 };
+  const visualTitles = {
+    battery_mode: pair("Battery mode", "Режим АКБ"), work_mode: pair("Work mode", "Режим роботи"),
+    energy_pattern: pair("Energy pattern", "Пріоритет енергії"), grid_frequency: pair("Grid frequency", "Частота мережі"),
+    grid_type: pair("Grid type", "Тип мережі"), gen_port_mode: pair("GEN port mode", "Режим порту GEN"),
+    adv_parallel_role: pair("Parallel role", "Роль у паралелі"), adv_parallel_phase: pair("Parallel phase", "Фаза в паралелі"),
+  };
+  const visualTerms = {
+    battery_mode: ["battery operation mode", "battery control mode"],
+    battery_capacity: ["battery capacity"], battery_max_charging_current: ["battery max charging current"],
+    battery_max_discharging_current: ["battery max discharging current"], battery_activate: ["battery wake up"],
+    generator_charge_current: ["battery generator charging current"], grid_charge_current: ["battery grid charging current"],
+    generator_charge: ["battery generator charging"], grid_charge: ["battery grid charging"],
+    generator_signal: ["charging signal"], grid_signal: ["charging signal"], charging_signal: ["charging signal"],
+    generator_charge_start_soc: ["battery generator charging start"], generator_charge_start_voltage: ["battery generator charging start voltage"],
+    grid_charge_start_soc: ["battery grid charging start"], grid_charge_start_voltage: ["battery grid charging start voltage"],
+    battery_lithium_mode: ["battery bms type", "lithium mode"], battery_control_mode: ["battery control mode"],
+    battery_operation_mode: ["battery operation mode"],
+    battery_shutdown: ["battery shutdown soc"], battery_low: ["battery low soc"], battery_restart: ["battery restart soc"],
+    battery_shutdown_voltage: ["battery shutdown voltage"], battery_low_voltage: ["battery low voltage"],
+    battery_restart_voltage: ["battery restart voltage"],
+    work_mode: ["work mode"], max_solar_power: ["pv power", "max solar power"], solar_sell: ["export surplus", "solar sell"],
+    max_sell_power: ["grid max export power", "export surplus power", "max sell power"], zero_export_power: ["zero export power"],
+    energy_pattern: ["energy pattern"], grid_peak_shaving: ["grid peak shaving"], grid_peak_shaving_power: ["grid peak shaving"],
+    time_of_use: ["time of use"],
+    grid_frequency: ["grid frequency"], grid_output_voltage: ["grid voltage", "output voltage"],
+    grid_reconnect_time: ["grid reconnection time"], grid_power_factor: ["grid power factor"],
+    grid_normal_high_v: ["grid voltage protection high"], grid_normal_low_v: ["grid voltage protection low"],
+    grid_normal_high_hz: ["grid frequency protection high"], grid_normal_low_hz: ["grid frequency protection low"],
+    gen_port_mode: ["io mode", "gen port"], gen_on_threshold: ["smartload on"], gen_off_threshold: ["smartload off"],
+    gen_ac_grid: ["generator grid side"], gen_always_on: ["generator on grid"],
+    generator_peak_shaving: ["generator peak shaving"], generator_peak_shaving_power: ["generator peak shaving"],
+    basic_datetime: ["date time"], basic_time_sync: ["time sync"], adv_mppt_scan: ["mppt multi point scanning"],
+    adv_meter_select: ["meter"], adv_export_limit: ["grid max export power"], adv_import_limit: ["grid max import power"],
+    device_info: ["device"], device_alarms: ["alarm"],
+  };
+  const visualFieldTerms = (name, english) => {
+    const program = /^tou_(\d)_(grid_charge|gen_charge|charge|start|power|battery|battery_voltage)$/.exec(name);
+    if (program) {
+      const n = program[1];
+      return {
+        grid_charge: [`program ${n} charging`], gen_charge: [`program ${n} charging`], charge: [`program ${n} charging`],
+        start: [`program ${n} time`], power: [`program ${n} power`], battery: [`program ${n} soc`, `program ${n} capacity`],
+        battery_voltage: [`program ${n} voltage`],
+      }[program[2]];
+    }
+    const day = /^tou_(mon|tue|wed|thu|fri|sat|sun)$/.exec(name);
+    if (day) return ["time of use", day[1]];
+    return visualTerms[name] ?? [String(english ?? name).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()].filter(Boolean);
+  };
+  const visualWords = (text) => String(text ?? "").normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim().split(" ").filter(Boolean);
+  function visualScore(terms, entity) {
+    const haystack = new Set([...visualWords(entity.attributes?.friendly_name), ...visualWords(entity.entity_id.split(".")[1].replace(/_/g, " "))]);
+    let best = 0;
+    for (const term of terms) {
+      const words = visualWords(term);
+      if (!words.length) continue;
+      const hits = words.filter(word => haystack.has(word)).length;
+      const numbers = words.filter(word => /^\d+$/.test(word));
+      if (numbers.some(word => !haystack.has(word))) continue;
+      best = Math.max(best, hits / words.length + (hits === words.length ? 1 : 0));
+    }
+    return best;
+  }
 
   class DeyeLcdEditor extends HTMLElement {
     connectedCallback() {
@@ -2644,6 +2787,8 @@
       this.activePage = "";
       this.activePeriod = 1;
       this.matchDevices = new Map();
+      try { this.menuView = localStorage.getItem(editorViewKey) === "list" ? "list" : "visual"; } catch { this.menuView = "visual"; }
+      this.visualField = "";
       this.attachShadow({ mode:"open" });
       this.shadowRoot.innerHTML = `<style>${editorStyles}</style>
         <div class="editor-layout"></div>
@@ -2657,6 +2802,7 @@
       });
       this.modal.addEventListener("close", () => { if (!this.modal.open) this.matchContext = null; });
       this.layout.addEventListener("click", event => this.navigate(event));
+      this.layout.addEventListener("input", event => this.visualInput(event));
       this.form = document.createElement("ha-form");
       this.form.addEventListener("value-changed", event => this.formChanged(event));
       this.render();
@@ -2727,14 +2873,15 @@
 
       const subgroups = section.schema.filter(item => item.schema);
       const active = subgroups.find(item => item.name === this.activePage) ?? subgroups[0];
-      const periodPage = this.tab === "menus" && active?.name === "menu_work_1";
+      const visual = this.tab === "menus" && this.menuView !== "list";
+      const periodPage = !visual && this.tab === "menus" && active?.name === "menu_work_1";
       const groupSchema = periodPage ? active.schema.filter(field =>
         !/^tou_[1-6]_/.test(field.name) || field.name.startsWith(`tou_${this.activePeriod}_`))
         : active?.schema ?? [];
       const direct = section.schema.filter(item => !item.schema);
       const mainGrid = this.tab === "screen" && direct.length > 1 && /_(pv|grid|load|battery)$/.test(section.name);
       const grid = (name, fields) => ({ name, type:"grid", flatten:true, schema:fields, column_min_width:"128px" });
-      const fields = [
+      const fields = visual ? [] : [
         ...(mainGrid ? [grid("editor_main_fields", direct)] : direct),
         ...(this.tab === "screen" && groupSchema.length
           ? [grid("editor_page_fields", groupSchema)] : groupSchema),
@@ -2742,7 +2889,7 @@
 
       const configuredModels = installedInverters(config).map(index => config[inverterField(index, "inverter_model")]);
       const layoutKey = [definitionKey, this.tab, this.inverterIndex, ...configuredModels, section.name, active?.name,
-        periodPage ? this.activePeriod : ""].join("|");
+        periodPage ? this.activePeriod : "", visual ? "visual" : "list"].join("|");
       if (this.layoutKey !== layoutKey) {
         this.layoutKey = layoutKey;
         const button = (kind, value, caption, selected, extra="") =>
@@ -2779,8 +2926,10 @@
           <section class="pane" aria-label="${escapeHtml(label)}"><h2>${escapeHtml(label)}</h2>
           ${this.tab === "general" ? `<p class="note">${t("Use the T button on the card to choose its theme, palette and appearance.", "Тему, палітру й оформлення обирайте кнопкою «Т» на самій картці.")}</p>` : ""}
           ${this.tab === "menus" && inverterTotal>1 ? `<p class="note">${t("Master inverter entities", "Сутності інвертора Master")}</p>` : ""}
-          ${pageButtons}${periodButtons}<div class="form-slot"></div></section></div>`;
-        this.layout.querySelector(".form-slot").append(this.form);
+          ${this.tab === "menus" ? `<div class="view-toggle" role="group" aria-label="${t("Editor view", "Вигляд редактора")}"><span>${t("View:", "Вигляд:")}</span>
+            ${button("view", "visual", t("Menu", "Меню"), visual)}${button("view", "list", t("List", "Список"), !visual)}</div>` : ""}
+          ${pageButtons}${periodButtons}${visual ? '<div class="visual-slot"></div>' : '<div class="form-slot"></div>'}</section></div>`;
+        if (!visual) this.layout.querySelector(".form-slot").append(this.form);
         Object.assign(this.form, { schema:fields, computeLabel, computeHelper });
         this.visibleFields = fields.flatMap(editorLeaves);
       }
@@ -2807,6 +2956,7 @@
         for (const item of sections) updateCount(item, "section");
         for (const item of subgroups) updateCount(item, "page");
       }
+      if (visual) { this.visualActive = active; this.renderVisual(active); }
       if (focus) this.layout.querySelector(focus)?.focus({ preventScroll:true });
     }
 
@@ -2815,6 +2965,15 @@
       if (!button) return;
       const args = button.dataset;
       if (args.match !== undefined) { this.matchIntro(); return; }
+      if (this.visualAction(args)) return;
+      if (args.view) {
+        this.menuView = args.view === "list" ? "list" : "visual";
+        try { localStorage.setItem(editorViewKey, this.menuView); } catch { /* kept for this session */ }
+        this.visualField = "";
+        this.notice.textContent = "";
+        this.render(`[data-view="${this.menuView}"]`);
+        return;
+      }
       if (args.tab) {
         if (args.tab === "menus" && this.tab !== "menus" && this.showEditorWarning()) {
           this.menuWarning();
@@ -2837,6 +2996,257 @@
       const [type, value] = Object.entries(args)[0];
       this.notice.textContent = "";
       this.render(`[data-${type}="${value}"]`);
+    }
+
+    visualDomains(name) {
+      return [].concat(bindingDomains[name] ?? (readingBindings.has(name) || name === "device_info" ? "sensor" : []));
+    }
+
+    visualState(name) {
+      const config = this.config;
+      if (lockedSettings.has(name)) return "locked";
+      if (!this.visualDomains(name).length) return "derived";
+      if (hasEditorBinding(config[name])) return "bound";
+      const via = (key) => hasEditorBinding(config[key]);
+      const slot = /^tou_(\d)_(grid_charge|gen_charge|battery)$/.exec(name);
+      if (slot && via(slot[2] === "battery" ? `tou_${slot[1]}_battery_voltage` : `tou_${slot[1]}_charge`)) return "shared";
+      if (name === "battery_mode" && (via("battery_control_mode") || via("battery_operation_mode"))) return "shared";
+      if (/^(generator|grid)_signal$/.test(name) && via("charging_signal")) return "shared";
+      if (/^battery_(shutdown|low|restart)$/.test(name) && via(`${name}_voltage`)) return "shared";
+      if (/^basic_(year|month|day|hour|minute)$/.test(name) && via("basic_datetime")) return "shared";
+      return "empty";
+    }
+
+    visualTitle(name, control) {
+      if (visualTitles[name]) return local(visualTitles[name], this.config);
+      const label = this.formDefinition?.computeLabel?.({ name });
+      return label || (control?.label ? local(control.label, this.config) : name);
+    }
+
+    visualValue(name, control) {
+      const entity = this.hassData?.states?.[this.config[name]];
+      if (!entity) return "";
+      const state = String(entity.state);
+      if (["unavailable", "unknown"].includes(state)) return "—";
+      if (control?.kind === "time") return state.slice(0, 5);
+      if (control?.kind === "number" || control?.kind === "readout") return state;
+      return state;
+    }
+
+    renderVisual(active) {
+      const slot = this.layout.querySelector(".visual-slot");
+      if (!slot) return;
+      const t = this.t.bind(this);
+      const parts = /^menu_([a-z]+)_(\d+)$/.exec(active?.name ?? "");
+      const menu = parts && settingsMenus.find(item => item.id === parts[1]);
+      const screen = menu?.pages[Number(parts[2])];
+      if (!screen) { slot.innerHTML = ""; return; }
+      if (this.visualPageKey !== active.name) { this.visualPageKey = active.name; this.visualField = ""; this.visualHelp = false; this.visualSearch = ""; }
+      const pct = (value, base) => `${(value / base * 100).toFixed(3)}%`;
+      const box = (c) => `left:${pct(c.x, visualScreen.w)};top:${pct(c.y, visualScreen.h)};width:${pct(c.w, visualScreen.w)};height:${pct(c.h, visualScreen.h)}`;
+      const readOnly = readOnlyMenus.has(menu.id);
+      const names = new Set();
+      const controls = screen.controls.map(control => {
+        if (control.kind === "line") return `<span class="v-line" style="${box(control)}"></span>`;
+        if (control.kind === "label") {
+          return `<span class="v-label" style="${box(control)};justify-content:${control.align === "center" ? "center" : control.align === "end" ? "flex-end" : "flex-start"};font-size:${(control.font * 0.92).toFixed(2)}cqw">${escapeHtml(local(control.label, this.config))}</span>`;
+        }
+        if (!control.name) return "";
+        const state = control.alias ? "alias" : this.visualState(control.name);
+        if (!["alias", "derived", "locked"].includes(state)) names.add(control.name);
+        const title = this.visualTitle(control.name, control);
+        const text = control.label ? local(control.label, this.config) : title;
+        const value = state === "bound" ? this.visualValue(control.name, control) : "";
+        const mark = { bound:"✓", shared:"⇄", empty:"+", alias:"", derived:"", locked:"🔒" }[state];
+        let inner;
+        if (control.kind === "checkbox" || control.kind === "radio") {
+          const sign = state === "bound" && control.kind === "checkbox" ? (value === "on" ? "✓" : value === "off" ? "" : "✓") : mark;
+          inner = `<i class="v-box${control.kind === "radio" ? " round" : ""}">${escapeHtml(sign)}</i>${control.compact ? "" : `<b>${escapeHtml(text)}</b>`}`;
+        } else if (control.kind === "alarms") {
+          inner = `<b>${escapeHtml(t("Alarm log", "Журнал тривог"))} ${mark}</b>`;
+        } else if (state === "alias") {
+          inner = `<b>${escapeHtml(t("auto", "авто"))}</b>`;
+        } else if (state === "derived") {
+          inner = `<b>${escapeHtml(t("from below", "з полів нижче"))}</b>`;
+        } else {
+          inner = `<b>${escapeHtml(state === "bound" ? `${value || "✓"}${value && control.unit && value !== "—" ? ` ${control.unit}` : ""}` : mark)}</b>`;
+        }
+        const disabled = ["alias", "derived", "locked"].includes(state);
+        const selected = this.visualField === control.name ? " selected" : "";
+        return `<button type="button" class="v-ctl v-${state} v-${control.kind}${control.compact ? " v-compact" : ""}${selected}" style="${box(control)}"
+          ${disabled ? "disabled" : `data-vfield="${escapeHtml(control.name)}"`} title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}">${inner}</button>`;
+      }).join("");
+      const extras = screen.extra.filter(name => this.visualDomains(name).length);
+      for (const name of extras) names.add(name);
+      const bound = [...names].filter(name => ["bound", "shared"].includes(this.visualState(name))).length;
+      const chips = extras.map(name => {
+        const state = this.visualState(name);
+        return `<button type="button" class="v-chip v-${state}${this.visualField === name ? " selected" : ""}" data-vfield="${escapeHtml(name)}">
+          <i>${{ bound:"✓", shared:"⇄", empty:"+" }[state] ?? ""}</i>${escapeHtml(this.visualTitle(name))}</button>`;
+      }).join("");
+      slot.innerHTML = `<div class="v-screen" data-readonly="${readOnly}">
+          <div class="v-head"><b>${escapeHtml(local(menu.title, this.config))}</b><span>${escapeHtml(local(screen.caption, this.config))}</span>
+          <em>${escapeHtml(readOnly ? t("VIEW ONLY · NO AUTO", "ЛИШЕ ПЕРЕГЛЯД · БЕЗ АВТО") : t("CARD SETTINGS", "НАЛАШТУВАННЯ КАРТКИ"))}</em></div>
+          <div class="v-body">${controls}</div>
+        </div>
+        <div class="v-sheet-slot"></div>
+        <p class="v-progress">${escapeHtml(t(`Linked on this page: ${bound} of ${names.size}`, `Прив’язано на сторінці: ${bound} з ${names.size}`))}</p>
+        ${extras.length ? `<div class="v-extra"><h3>${escapeHtml(t("Additional for this page", "Додатково для цієї сторінки"))}</h3><div>${chips}</div></div>` : ""}
+        <p class="v-legend"><span><i class="v-dot bound"></i>${t("linked", "прив’язано")}</span><span><i class="v-dot empty"></i>${t("empty — tap to choose", "порожньо — натисніть")}</span>
+          <span><i class="v-dot shared"></i>${t("covered by a shared entity", "через спільну сутність")}</span></p>`;
+      this.renderSheet();
+    }
+
+    renderSheet() {
+      const slot = this.layout.querySelector(".v-sheet-slot");
+      if (!slot) return;
+      const name = this.visualField;
+      if (!name) { slot.innerHTML = ""; return; }
+      const t = this.t.bind(this);
+      const control = this.visualPageControl(name);
+      const title = this.visualTitle(name, control);
+      const domains = this.visualDomains(name);
+      const current = this.config[name];
+      const currentEntity = current ? this.hassData?.states?.[current] : null;
+      const help = this.visualHelpText(name, control, domains);
+      slot.innerHTML = `<section class="v-sheet" aria-label="${escapeHtml(t("Choose an entity", "Вибір сутності"))}">
+        <div class="v-sheet-head"><div><h3>${escapeHtml(title)}</h3><small>${escapeHtml(t("fits: ", "підходять: "))}${escapeHtml(domains.join(" / "))}</small></div>
+          <button type="button" class="v-help-btn" data-vhelp aria-pressed="${Boolean(this.visualHelp)}"><span aria-hidden="true">?</span>${escapeHtml(this.visualHelp ? t("Hide", "Сховати") : t("Tip", "Порада"))}</button></div>
+        ${this.visualHelp ? `<div class="v-help"><h4>${t("WHAT THIS IS", "ЩО ЦЕ ЗА ПУНКТ")}</h4><p>${escapeHtml(help.what)}</p>
+          <h4>${t("NO MATCH? SEARCH FOR", "ЯКЩО НЕМАЄ ЗБІГУ — ШУКАЙТЕ")}</h4><div class="v-terms">${help.terms.map(term => `<button type="button" data-vterm="${escapeHtml(term)}">${escapeHtml(term)}</button>`).join("")}</div>
+          <p class="v-tip">${escapeHtml(help.tip)}</p></div>` : ""}
+        ${current ? `<div class="v-current"><span><b>${escapeHtml(currentEntity?.attributes?.friendly_name ?? current)}</b><small>${escapeHtml(current)}${currentEntity ? "" : ` · ${t("not found in Home Assistant", "не знайдено в Home Assistant")}`}</small></span>
+          <button type="button" data-vclear>${t("Clear", "Очистити")}</button></div>` : ""}
+        <input type="search" data-vsearch value="${escapeHtml(this.visualSearch ?? "")}" placeholder="${escapeHtml(t("Search entity…", "Пошук сутності…"))}" aria-label="${escapeHtml(t("Search entity", "Пошук сутності"))}">
+        <div class="v-list">${this.visualListHtml(name, control, domains)}</div>
+        <div class="actions"><button type="button" data-vclose>${t("Close", "Закрити")}</button></div>
+      </section>`;
+    }
+
+    visualPageControl(name) {
+      for (const menu of settingsMenus) for (const screen of menu.pages) {
+        const control = screen.controls.find(item => item.name === name && !item.alias);
+        if (control) return control;
+      }
+      return null;
+    }
+
+    visualListHtml(name, control, domains) {
+      const t = this.t.bind(this);
+      const states = Object.values(this.hassData?.states ?? {}).filter(entity => domains.includes(entity.entity_id.split(".")[0]));
+      if (!states.length) {
+        return `<p class="v-empty">${escapeHtml(t(`No ${domains.join(" / ")} entities in Home Assistant. Open the tip above.`,
+          `У Home Assistant немає сутностей типу ${domains.join(" / ")}. Відкрийте пораду вище.`))}</p>`;
+      }
+      const english = control?.label?.en ?? visualTitles[name]?.en;
+      const terms = visualFieldTerms(name, english);
+      const query = visualWords(this.visualSearch);
+      const matchesQuery = entity => {
+        if (!query.length) return true;
+        const text = `${entity.attributes?.friendly_name ?? ""} ${entity.entity_id}`.toLowerCase();
+        return query.every(word => text.includes(word));
+      };
+      const scored = states.filter(matchesQuery).map(entity => ({ entity, score:visualScore(terms, entity) }))
+        .sort((a, b) => b.score - a.score || String(a.entity.attributes?.friendly_name ?? a.entity.entity_id).localeCompare(String(b.entity.attributes?.friendly_name ?? b.entity.entity_id)));
+      const similar = scored.filter(item => item.score >= 2).slice(0, 6);
+      const rest = scored.filter(item => !similar.includes(item)).slice(0, 60);
+      const row = ({ entity }) => `<button type="button" class="v-pick${entity.entity_id === this.config[name] ? " current" : ""}" data-vpick="${escapeHtml(entity.entity_id)}">
+        <span><b>${escapeHtml(entity.attributes?.friendly_name ?? entity.entity_id)}</b><small>${escapeHtml(entity.entity_id)}</small></span><em>${escapeHtml(String(entity.state).slice(0, 18))}</em></button>`;
+      const hidden = scored.length - similar.length - rest.length;
+      return `${similar.length ? `<h4>${t("SIMILAR BY NAME", "СХОЖІ ЗА НАЗВОЮ")}</h4>${similar.map(row).join("")}` : ""}
+        ${rest.length ? `<h4>${similar.length ? t("OTHER ENTITIES", "ІНШІ СУТНОСТІ") : t("ENTITIES", "СУТНОСТІ")}</h4>${rest.map(row).join("")}` : ""}
+        ${!scored.length ? `<p class="v-empty">${escapeHtml(t("Nothing found. Try another word or open the tip.", "Нічого не знайдено. Спробуйте інше слово або відкрийте пораду."))}</p>` : ""}
+        ${hidden > 0 ? `<p class="v-empty">${escapeHtml(t(`${hidden} more — refine the search.`, `Ще ${hidden} — уточніть пошук.`))}</p>` : ""}`;
+    }
+
+    visualHelpText(name, control, domains) {
+      const t = this.t.bind(this);
+      const menu = settingsMenus.find(item => item.pages.some(screen => screen.controls.includes(control) || screen.extra.includes(name)));
+      const menuTitle = menu ? local(menu.title, this.config) : "";
+      const title = this.visualTitle(name, control);
+      const english = control?.label?.en ?? visualTitles[name]?.en;
+      const slot = /^tou_(\d)_/.exec(name)?.[1];
+      const specific = {
+        grid_charge: slot && t(`Grid tick in period ${slot}: may the inverter charge the battery from the grid at this time. In ha-solarman it is one select «Program ${slot} Charging» (Disabled / Grid / Gen / Grid & Gen) that also drives the GEN tick — you can link it under «Additional for this page».`,
+          `Галочка «Мережа» у періоді ${slot}: чи можна заряджати АКБ від мережі в цей час. У ha-solarman це один селектор «Program ${slot} Charging» (Disabled / Grid / Gen / Grid & Gen), він же керує і галочкою GEN — його можна прив’язати в рядку «Додатково для цієї сторінки».`),
+        gen_charge: slot && t(`GEN tick in period ${slot}: may the battery charge from the generator at this time. Usually the same shared «Program ${slot} Charging» select.`,
+          `Галочка «GEN» у періоді ${slot}: чи можна заряджати АКБ від генератора в цей час. Зазвичай це той самий спільний селектор «Program ${slot} Charging».`),
+        start: slot && t(`Start time of period ${slot}. The end is taken automatically from the start of the next period.`,
+          `Час початку періоду ${slot}. Кінець картка бере сама — це початок наступного періоду.`),
+        power: slot && t(`Maximum battery power in period ${slot}, in watts.`, `Максимальна потужність АКБ у періоді ${slot}, у ватах.`),
+        battery: slot && t(`Battery target for period ${slot}: % (SOC) or, in voltage mode, volts — the volts entity goes under «Additional for this page».`,
+          `Поріг АКБ для періоду ${slot}: % (SOC), а в режимі «За напругою» — вольти; сутність у вольтах прив’язується в рядку «Додатково для цієї сторінки».`),
+        charge: slot && t(`Shared charge selector of period ${slot}: one entity for both Grid and GEN ticks.`, `Спільний селектор заряду періоду ${slot}: одна сутність на обидві галочки — «Мережа» і «GEN».`),
+        battery_voltage: slot && t(`Battery target of period ${slot} in volts, for the voltage battery mode.`, `Поріг АКБ періоду ${slot} у вольтах — для режиму АКБ «За напругою».`),
+      }[/^tou_\d_(.+)$/.exec(name)?.[1]];
+      const helper = this.formDefinition?.computeHelper?.({ name });
+      const base = readingBindings.has(name) || name === "device_info"
+        ? t(`«${title}» from the ${menuTitle} menu. Display only: the card just reads the value.`, `«${title}» з меню «${menuTitle}». Лише показ: картка тільки читає значення.`)
+        : readOnlyMenus.has(menu?.id)
+          ? t(`«${title}» from the ${menuTitle} menu. View only: the card never changes grid settings, and Auto never fills this menu.`, `«${title}» з меню «${menuTitle}». Лише перегляд: картка не змінює налаштування мережі, і «Авто» це меню не заповнює.`)
+          : t(`«${title}» from the ${menuTitle} menu. The card shows its value and can change it after confirmation.`, `«${title}» з меню «${menuTitle}». Картка показує значення і може змінити його після підтвердження.`);
+      const what = [specific || base, helper].filter(Boolean).join(" ");
+      const type = {
+        number: t("Type number: only it can be changed from the card; a sensor with the same value will not do.", "Тип number: лише його можна змінювати з картки, сенсор із тим самим числом не підійде."),
+        switch: t("Type switch: on / off.", "Тип switch: увімкнено / вимкнено."),
+        select: t("Type select: a list of options, as on the inverter.", "Тип select: список варіантів, як на інверторі."),
+        time: t("Type time is best; number or select also work.", "Найкраще тип time; number чи select теж підійдуть."),
+        sensor: t("Type sensor: display only.", "Тип sensor: лише для показу."),
+        datetime: t("Type datetime: date and time in one entity.", "Тип datetime: дата й час в одній сутності."),
+        button: t("Type button.", "Тип button."),
+      }[domains[0]] ?? "";
+      const missing = t("Not in the list? Settings → Devices & services → Entities: search for it and check that it is not disabled (show disabled entities).",
+        "Немає у списку? Налаштування → Пристрої та служби → Сутності: знайдіть пошуком і перевірте, чи вона не вимкнена (увімкніть показ вимкнених).");
+      return { what, terms:visualFieldTerms(name, english), tip:[type, missing].filter(Boolean).join(" ") };
+    }
+
+    visualAction(args) {
+      const t = this.t.bind(this);
+      if (args.vfield !== undefined) {
+        this.visualField = this.visualField === args.vfield ? "" : args.vfield;
+        this.visualHelp = false;
+        this.visualSearch = "";
+        this.renderVisualAgain();
+        if (this.visualField) this.layout.querySelector(".v-sheet")?.scrollIntoView({ block:"nearest", behavior:"smooth" });
+      } else if (args.vhelp !== undefined) {
+        this.visualHelp = !this.visualHelp;
+        this.renderSheet();
+        this.layout.querySelector("[data-vhelp]")?.focus({ preventScroll:true });
+      } else if (args.vterm !== undefined) {
+        this.visualSearch = args.vterm;
+        this.renderSheet();
+      } else if (args.vclose !== undefined) {
+        const name = this.visualField;
+        this.visualField = "";
+        this.renderVisualAgain();
+        this.layout.querySelector(`[data-vfield="${CSS.escape(name)}"]`)?.focus({ preventScroll:true });
+      } else if (args.vclear !== undefined) {
+        const next = { ...this.config };
+        delete next[this.visualField];
+        this.notice.textContent = t("Link removed.", "Прив’язку прибрано.");
+        this.commit(next);
+      } else if (args.vpick !== undefined) {
+        const name = this.visualField;
+        this.visualField = "";
+        this.notice.textContent = t(`Linked: ${args.vpick}`, `Прив’язано: ${args.vpick}`);
+        this.commit({ ...this.config, [name]:args.vpick });
+        this.layout.querySelector(`[data-vfield="${CSS.escape(name)}"]`)?.focus({ preventScroll:true });
+      } else return false;
+      return true;
+    }
+
+    renderVisualAgain() {
+      const active = this.visualActive;
+      if (active) this.renderVisual(active);
+    }
+
+    visualInput(event) {
+      const input = event.target.closest?.("[data-vsearch]");
+      if (!input) return;
+      this.visualSearch = input.value;
+      const list = this.layout.querySelector(".v-list");
+      const name = this.visualField;
+      if (list && name) list.innerHTML = this.visualListHtml(name, this.visualPageControl(name), this.visualDomains(name));
     }
 
     showEditorWarning() {
