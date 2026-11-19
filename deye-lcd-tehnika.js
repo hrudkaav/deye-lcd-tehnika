@@ -9,7 +9,7 @@
   const legacyCardTag = "deye-lcd-8k";
   if (customElements.get(cardTag)) return;
 
-  const version = "Alpha 0.8.20";
+  const version = "Alpha 0.8.21";
   const models = [3, 5, 6, 8, 10, 12, 15, 20, 30, 80, 160];
   const defaultModel = 8;
   const themes = [
@@ -2635,10 +2635,10 @@
     .view-toggle button{min-height:34px;padding:4px 12px;font-size:.9em}
     .visual-slot{display:grid;gap:10px;min-width:0}
     .v-screen{position:relative;border-radius:9px;overflow:hidden;outline:3px solid #f2b632;outline-offset:2px;margin:3px;
-      background:linear-gradient(180deg,#302183 13%,#2d46a2 53%,#157d98 100%);color:#f4faff;container-type:inline-size;font-family:Roboto,Arial,sans-serif;aspect-ratio:350/268}
+      background:linear-gradient(180deg,#302183 13%,#2d46a2 53%,#157d98 100%);color:#f4faff;container-type:inline-size;font-family:Roboto,Arial,sans-serif;aspect-ratio:400/268}
     .v-head{display:flex;align-items:center;gap:8px;position:absolute;left:0;right:0;top:0;z-index:2;padding:0 3cqw;height:12.69%;
       background:repeating-linear-gradient(135deg,#f2b632 0 14px,#e0a21e 14px 28px);color:#2a1e05}
-    .v-head b{font-size:4.6cqw;white-space:nowrap}
+    .v-head b{font-size:4.4cqw;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .v-head span{font-size:3.2cqw;opacity:.85;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .v-head em{margin-left:auto;font-style:normal;font-weight:700;font-size:2.6cqw;padding:.6cqw 1.6cqw;border-radius:4px;background:#2a1e05;color:#f2b632;white-space:nowrap}
     .v-screen[data-readonly="true"] .v-head{background:repeating-linear-gradient(135deg,#9aa6b2 0 14px,#87939f 14px 28px)}
@@ -2647,12 +2647,12 @@
     .v-label,.v-line,.v-ctl{position:absolute}
     .v-label{display:flex;align-items:center;line-height:1.05;color:#f4faff;overflow:hidden;pointer-events:none;font-weight:500}
     .v-line{background:#aeedfc66;height:1px!important}
-    .v-ctl{display:flex;align-items:center;justify-content:center;gap:1.2cqw;min-height:0;padding:0 1cqw;border-radius:3px;
-      font-size:3cqw;line-height:1;overflow:hidden;white-space:nowrap;color:#12284e;background:#def4ed;border:1px solid #aeedfc}
+    .v-ctl{display:flex;align-items:center;justify-content:center;gap:1cqw;min-height:0;padding:0 .9cqw;border-radius:3px;
+      font-size:2.65cqw;line-height:1;overflow:hidden;white-space:nowrap;color:#12284e;background:#def4ed;border:1px solid #aeedfc}
     .v-ctl b{font-weight:600;overflow:hidden;text-overflow:ellipsis}
     .v-ctl.v-checkbox,.v-ctl.v-radio{justify-content:flex-start;background:#08469744;color:#f4faff;border-color:#aeedfc88}
     .v-ctl.v-compact{justify-content:center}
-    .v-box{flex:none;display:grid;place-items:center;width:4.4cqw;height:4.4cqw;font-style:normal;font-weight:800;font-size:3cqw;
+    .v-box{flex:none;display:grid;place-items:center;width:3.9cqw;height:3.9cqw;font-style:normal;font-weight:800;font-size:2.65cqw;
       border:1px solid #aeedfc;background:#def4ed;color:#12284e;border-radius:2px}
     .v-box.round{border-radius:50%}
     .v-ctl.v-bound{box-shadow:inset 3px 0 0 #2fbf6a}
@@ -2667,6 +2667,27 @@
     .v-ctl.selected{outline:3px solid #ffdf84;outline-offset:1px;z-index:1}
     .v-ctl:hover:enabled{filter:brightness(1.12);border-color:#ffdf84}
     .v-ctl.v-alarms{align-items:flex-start;padding-top:2cqw}
+    .v-tiles{position:absolute;left:3cqw;right:3cqw;top:calc(12.69% + 4cqw);bottom:3cqw;display:grid;gap:2.4cqw;
+      grid-template-columns:minmax(0,.9fr) repeat(2,minmax(0,1fr));grid-template-rows:repeat(3,minmax(0,1fr));
+      grid-template-areas:"battery work smart" "battery grid gen" "basic advanced device"}
+    .v-tile{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.8cqw;min-height:0;padding:0 1cqw;border-radius:4px;
+      border:2px solid #aeedfc;background:#08469766;color:#f4faff;font-size:3.3cqw;line-height:1.15;overflow:hidden;overflow-wrap:anywhere}
+    .v-tile b{font-weight:600}
+    .v-tile small{font-size:2.5cqw;font-variant-numeric:tabular-nums;padding:.3cqw 1.2cqw;border-radius:9px;background:#00000040}
+    .v-tile-empty{border:2px dashed #f2b632}
+    .v-tile-empty small{color:#f2b632}
+    .v-tile-part{box-shadow:inset .9cqw 0 0 #f2b632}
+    .v-tile-part small,.v-tile-full small{color:#b8f5cf}
+    .v-tile-full{box-shadow:inset .9cqw 0 0 #2fbf6a}
+    .v-tile-none{opacity:.55;border-style:dotted}
+    .v-tile:hover:enabled{border-color:#ffdf84;filter:brightness(1.12)}
+    .v-nav{position:absolute;right:0;top:12.69%;bottom:0;width:12.75%;display:flex;flex-direction:column;gap:1.2cqw;padding:1cqw 1cqw 1.2cqw 0}
+    .v-nav button{flex:1;min-height:0;padding:0;border-radius:4px;border:1px solid #aeedfc;background:#08469744;color:#f4faff;font-size:4.6cqw;font-weight:700;display:grid;place-items:center}
+    .v-nav button:disabled{opacity:.35}
+    .v-nav span{display:grid;place-items:center;text-align:center;font-size:2.4cqw;line-height:1.1;color:#f4faff}
+    .v-nav small{display:block;font-size:2.2cqw;opacity:.75}
+    .v-nav .v-back{flex:1.25;background:#f2b632;color:#2a1e05;border-color:#f2b632;align-content:center;gap:.4cqw}
+    .v-nav .v-back small{font-size:2.3cqw;opacity:1;font-weight:700}
     .v-progress,.v-legend{margin:0;color:var(--secondary-text-color,#a7bac9);font-size:.9em}
     .v-legend{display:flex;flex-wrap:wrap;gap:6px 14px}
     .v-legend span{display:inline-flex;align-items:center;gap:6px}
@@ -2712,7 +2733,7 @@
   `;
 
   const editorViewKey = "deye-lcd-tehnika:editor-menu-view";
-  const visualScreen = { w:350, h:268 };
+  const visualScreen = { w:400, h:268 };
   const visualTitles = {
     battery_mode: pair("Battery mode", "Режим АКБ"), work_mode: pair("Work mode", "Режим роботи"),
     energy_pattern: pair("Energy pattern", "Пріоритет енергії"), grid_frequency: pair("Grid frequency", "Частота мережі"),
@@ -2904,17 +2925,17 @@
               : t(`Inverter ${index+1}`, `Інвертор ${index+1}`), index===this.inverterIndex,
             `<small>${escapeHtml(modelText(readModel(config[inverterField(index, "inverter_model")], inverterTotal>1), config))}</small>`)).join("")}
           </div><button type="button" data-match>${t("Auto", "Авто")}</button></div>` : "";
-        const sidebar = this.tab === "general" ? "" : `<nav class="side" aria-label="${t("Sections", "Розділи")}">
+        const sidebar = this.tab === "general" || visual ? "" : `<nav class="side" aria-label="${t("Sections", "Розділи")}">
           ${sections.map(item => button("section", item.name, item.title, item===section,
             this.tab === "screen" ? '<span class="count" aria-hidden="true"></span>' : "")).join("")}</nav>`;
-        const label = this.tab === "general" ? t("General", "Загальне") : section.title;
+        const label = this.tab === "general" ? t("General", "Загальне") : visual ? t("Inverter menus", "Меню інвертора") : section.title;
         const pageTitle = (item) => {
           const phase = /_l([123])$/.exec(item.name);
           if (phase) return t(`L${phase[1]}`, `Ф${phase[1]}`);
           const bank = /^screen_\d_battery_([12])$/.exec(item.name);
           return bank ? `BAT${bank[1]}` : item.title;
         };
-        const pageButtons = !active ? "" : `<nav class="pages" aria-label="${t("Pages and phases", "Сторінки та фази")}">
+        const pageButtons = !active || visual ? "" : `<nav class="pages" aria-label="${t("Pages and phases", "Сторінки та фази")}">
           ${subgroups.map(item => button("page", item.name, pageTitle(item), active===item,
             this.tab === "screen" ? '<span class="count" aria-hidden="true"></span>' : "")).join("")}</nav>`;
         const periodButtons = !periodPage ? "" : `<nav class="pages" aria-label="${t("Time-of-use periods", "Періоди Time of Use")}">
@@ -2956,7 +2977,7 @@
         for (const item of sections) updateCount(item, "section");
         for (const item of subgroups) updateCount(item, "page");
       }
-      if (visual) { this.visualActive = active; this.renderVisual(active); }
+      if (visual) this.renderVisual();
       if (focus) this.layout.querySelector(focus)?.focus({ preventScroll:true });
     }
 
@@ -3033,15 +3054,52 @@
       return state;
     }
 
-    renderVisual(active) {
+    visualMenuStats(menu) {
+      const names = new Set();
+      for (const screen of menu.pages) {
+        for (const control of screen.controls) {
+          if (!control.name || control.alias) continue;
+          if (["alias", "derived", "locked"].includes(this.visualState(control.name))) continue;
+          names.add(control.name);
+        }
+        for (const name of screen.extra) if (this.visualDomains(name).length) names.add(name);
+      }
+      const bound = [...names].filter(name => ["bound", "shared"].includes(this.visualState(name))).length;
+      return { bound, total:names.size };
+    }
+
+    renderVisual() {
       const slot = this.layout.querySelector(".visual-slot");
       if (!slot) return;
       const t = this.t.bind(this);
-      const parts = /^menu_([a-z]+)_(\d+)$/.exec(active?.name ?? "");
-      const menu = parts && settingsMenus.find(item => item.id === parts[1]);
-      const screen = menu?.pages[Number(parts[2])];
-      if (!screen) { slot.innerHTML = ""; return; }
-      if (this.visualPageKey !== active.name) { this.visualPageKey = active.name; this.visualField = ""; this.visualHelp = false; this.visualSearch = ""; }
+      const menu = settingsMenus.find(item => item.id === this.visualMenuId);
+      const legend = `<p class="v-legend"><span><i class="v-dot bound"></i>${t("linked", "прив’язано")}</span><span><i class="v-dot empty"></i>${t("empty — tap to choose", "порожньо — натисніть")}</span>
+          <span><i class="v-dot shared"></i>${t("covered by a shared entity", "через спільну сутність")}</span></p>`;
+      const badge = (readOnly) => `<em>${escapeHtml(readOnly ? t("VIEW ONLY · NO AUTO", "ЛИШЕ ПЕРЕГЛЯД · БЕЗ АВТО") : t("CARD SETTINGS", "НАЛАШТУВАННЯ КАРТКИ"))}</em>`;
+      if (!menu) {
+        this.visualField = "";
+        let all = 0, linked = 0;
+        const tiles = settingsMenus.map(item => {
+          const { bound, total } = this.visualMenuStats(item);
+          all += total; linked += bound;
+          const readOnly = readOnlyMenus.has(item.id);
+          const state = !total ? "none" : bound === 0 ? "empty" : bound === total ? "full" : "part";
+          const note = !total ? t("no fields", "немає полів") : `${bound}/${total}`;
+          return `<button type="button" class="v-tile v-tile-${state}" style="grid-area:${item.id}" ${total ? `data-vmenu="${item.id}"` : "disabled"}
+            aria-label="${escapeHtml(local(item.title, this.config))} · ${escapeHtml(note)}"><b>${escapeHtml(local(item.title, this.config))}</b>
+            <small>${readOnly ? `${escapeHtml(t("view only", "лише перегляд"))} · ` : ""}${escapeHtml(note)}</small></button>`;
+        }).join("");
+        slot.innerHTML = `<div class="v-screen v-home">
+            <div class="v-head"><b>${escapeHtml(t("System Setup", "Налаштування системи"))}</b>${badge(false)}</div>
+            <div class="v-tiles">${tiles}</div>
+          </div>
+          <p class="v-progress">${escapeHtml(t(`Linked in all menus: ${linked} of ${all}. Open a menu to link its fields.`, `Прив’язано в усіх меню: ${linked} з ${all}. Відкрийте меню, щоб прив’язати його поля.`))}</p>${legend}`;
+        return;
+      }
+      const pageIndex = Math.min(menu.pages.length - 1, Math.max(0, this.visualPageIndex ?? 0));
+      const screen = menu.pages[pageIndex];
+      const key = `${menu.id}:${pageIndex}`;
+      if (this.visualPageKey !== key) { this.visualPageKey = key; this.visualField = ""; this.visualHelp = false; this.visualSearch = ""; }
       const pct = (value, base) => `${(value / base * 100).toFixed(3)}%`;
       const box = (c) => `left:${pct(c.x, visualScreen.w)};top:${pct(c.y, visualScreen.h)};width:${pct(c.w, visualScreen.w)};height:${pct(c.h, visualScreen.h)}`;
       const readOnly = readOnlyMenus.has(menu.id);
@@ -3060,7 +3118,7 @@
         const mark = { bound:"✓", shared:"⇄", empty:"+", alias:"", derived:"", locked:"🔒" }[state];
         let inner;
         if (control.kind === "checkbox" || control.kind === "radio") {
-          const sign = state === "bound" && control.kind === "checkbox" ? (value === "on" ? "✓" : value === "off" ? "" : "✓") : mark;
+          const sign = state === "bound" && control.kind === "checkbox" ? (value === "off" ? "" : "✓") : mark;
           inner = `<i class="v-box${control.kind === "radio" ? " round" : ""}">${escapeHtml(sign)}</i>${control.compact ? "" : `<b>${escapeHtml(text)}</b>`}`;
         } else if (control.kind === "alarms") {
           inner = `<b>${escapeHtml(t("Alarm log", "Журнал тривог"))} ${mark}</b>`;
@@ -3084,16 +3142,22 @@
         return `<button type="button" class="v-chip v-${state}${this.visualField === name ? " selected" : ""}" data-vfield="${escapeHtml(name)}">
           <i>${{ bound:"✓", shared:"⇄", empty:"+" }[state] ?? ""}</i>${escapeHtml(this.visualTitle(name))}</button>`;
       }).join("");
+      const caption = local(screen.caption, this.config);
+      const heading = screen.title ? local(screen.title, this.config) : local(menu.title, this.config);
+      const nav = `<div class="v-nav">
+          <button type="button" data-vstep="-1" ${pageIndex === 0 ? "disabled" : ""} aria-label="${escapeHtml(t("Previous page", "Попередня сторінка"))}">↑</button>
+          <span>${escapeHtml(caption)}<small>${pageIndex + 1}/${menu.pages.length}</small></span>
+          <button type="button" data-vstep="1" ${pageIndex === menu.pages.length - 1 ? "disabled" : ""} aria-label="${escapeHtml(t("Next page", "Наступна сторінка"))}">↓</button>
+          <button type="button" class="v-back" data-vback aria-label="${escapeHtml(t("Back to System Setup", "Назад до меню налаштувань"))}">↩<small>${escapeHtml(t("Back", "Назад"))}</small></button>
+        </div>`;
       slot.innerHTML = `<div class="v-screen" data-readonly="${readOnly}">
-          <div class="v-head"><b>${escapeHtml(local(menu.title, this.config))}</b><span>${escapeHtml(local(screen.caption, this.config))}</span>
-          <em>${escapeHtml(readOnly ? t("VIEW ONLY · NO AUTO", "ЛИШЕ ПЕРЕГЛЯД · БЕЗ АВТО") : t("CARD SETTINGS", "НАЛАШТУВАННЯ КАРТКИ"))}</em></div>
-          <div class="v-body">${controls}</div>
+          <div class="v-head"><b>${escapeHtml(heading)}</b>${badge(readOnly)}</div>
+          <div class="v-body">${controls}</div>${nav}
         </div>
         <div class="v-sheet-slot"></div>
         <p class="v-progress">${escapeHtml(t(`Linked on this page: ${bound} of ${names.size}`, `Прив’язано на сторінці: ${bound} з ${names.size}`))}</p>
         ${extras.length ? `<div class="v-extra"><h3>${escapeHtml(t("Additional for this page", "Додатково для цієї сторінки"))}</h3><div>${chips}</div></div>` : ""}
-        <p class="v-legend"><span><i class="v-dot bound"></i>${t("linked", "прив’язано")}</span><span><i class="v-dot empty"></i>${t("empty — tap to choose", "порожньо — натисніть")}</span>
-          <span><i class="v-dot shared"></i>${t("covered by a shared entity", "через спільну сутність")}</span></p>`;
+        ${legend}`;
       this.renderSheet();
     }
 
@@ -3202,6 +3266,19 @@
 
     visualAction(args) {
       const t = this.t.bind(this);
+      if (args.vmenu !== undefined || args.vback !== undefined || args.vstep !== undefined) {
+        if (args.vmenu !== undefined) { this.visualMenuId = args.vmenu; this.visualPageIndex = 0; }
+        else if (args.vback !== undefined) { this.visualMenuId = ""; }
+        else this.visualPageIndex = (this.visualPageIndex ?? 0) + Number(args.vstep);
+        this.visualField = "";
+        this.notice.textContent = "";
+        this.renderVisual();
+        const focus = args.vmenu !== undefined ? "[data-vback]" : args.vback !== undefined ? `[data-vmenu="${CSS.escape(this.visualPreviousMenu ?? "")}"]` : `[data-vstep="${args.vstep}"]:enabled`;
+        if (args.vmenu !== undefined) this.visualPreviousMenu = args.vmenu;
+        (this.layout.querySelector(focus) ?? this.layout.querySelector(".v-screen button:enabled"))?.focus({ preventScroll:true });
+        this.layout.querySelector(".v-screen")?.scrollIntoView({ block:"nearest" });
+        return true;
+      }
       if (args.vfield !== undefined) {
         this.visualField = this.visualField === args.vfield ? "" : args.vfield;
         this.visualHelp = false;
@@ -3235,10 +3312,7 @@
       return true;
     }
 
-    renderVisualAgain() {
-      const active = this.visualActive;
-      if (active) this.renderVisual(active);
-    }
+    renderVisualAgain() { this.renderVisual(); }
 
     visualInput(event) {
       const input = event.target.closest?.("[data-vsearch]");
