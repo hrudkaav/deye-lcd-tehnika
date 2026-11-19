@@ -9,7 +9,7 @@
   const legacyCardTag = "deye-lcd-8k";
   if (customElements.get(cardTag)) return;
 
-  const version = "Alpha 0.8.14";
+  const version = "Alpha 0.8.15";
   const models = [3, 5, 6, 8, 10, 12, 15, 20, 30, 80, 160];
   const defaultModel = 8;
   const themes = [
@@ -23,6 +23,8 @@
   const acSources = ["grid", "load"];
   const screenWhite = "#ffffff";
   const flowThreshold = 5;
+  const gridOffVoltage = 20;
+  const pvInputs = [1, 2, 3, 4, 5, 6];
   const gaugeRadius = 41;
   const gaugeStart = 142;
   const gaugeSweep = 256;
@@ -467,8 +469,13 @@
     const indices = primaryOnly ? [0] : installedInverters(config);
     return indices.map(index => {
       const invert = gauge.invert ? config?.[inverterField(index, gauge.invert)] === true : false;
+      const id = config?.[inverterField(index, gauge.key)];
+      // Solar without a total sensor: the card adds up the separate PV inputs (PV1…PV6).
+      const strings = source === "pv" && !id
+        ? pvInputs.map(n => config?.[inverterField(index, `pv_${n}_power`)]).filter(value => typeof value === "string" && value) : [];
       return {
-        index, id:config?.[inverterField(index, gauge.key)], invert,
+        index, id, invert,
+        ...(strings.length ? { parts:strings.map(part => ({ id:part, invert:false })) } : {}),
         ...(source === "battery" && mode === "channels" ? { parts:[1,2].map(channel => ({
           id:config?.[inverterField(index, `battery_${channel}_power`)], invert,
         })) } : {}),
@@ -550,8 +557,11 @@
   function isGridDisconnected(statusEntity, voltageEntity) {
     if (statusEntity?.state === "off") return true;
     if (statusEntity?.state === "on") return false;
-    const unit = voltageEntity?.attributes?.unit_of_measurement?.trim().toLowerCase();
-    return (!unit || ["v", "в", "mv", "kv"].includes(unit)) && reading(voltageEntity) === 0;
+    // Without a status entity: below 20 V on the grid input counts as no grid (inverters often show a few volts of residual voltage).
+    const unit = voltageEntity?.attributes?.unit_of_measurement?.trim().toLowerCase() || "v";
+    const factor = { v:1, "в":1, mv:0.001, "мв":0.001, kv:1000, "кв":1000 }[unit];
+    const volts = reading(voltageEntity);
+    return factor !== undefined && volts !== null && volts * factor < gridOffVoltage;
   }
 
   function formatPower(w) {
@@ -2263,6 +2273,10 @@
       gauge.source !== "battery" || index === 0 || batterySeparate(config) || ["inverters","channels"].includes(config.battery_power_mode)).map(gauge => {
       const { source, invert } = gauge;
       const settings = readings(index, source, source === "battery" ? measurementFields : acMeasurements);
+      if (source === "pv") settings.push(group(`screen_${index}_pv_inputs`, t("PV1–PV6", "PV1–PV6"),
+        pvInputs.map(n => entity(inverterField(index, `pv_${n}_power`), t(`PV${n} · power`, `PV${n} · потужність`), "sensor",
+          n === 1 ? t("Only when there is no total solar power sensor: the card adds the inputs together.",
+            "Лише якщо немає загальної потужності сонця: картка складе входи разом.") : undefined))));
       if (source === "battery") {
         settings.push(entity(inverterField(index, "battery_soc"), t("Battery charge · SOC", "Заряд АКБ · SOC")));
         if (parallel && batterySeparate(config)) {
@@ -2426,7 +2440,7 @@
     if (key === "grid_connected") {
       return { domain:"binary_sensor", names:new Set(["grid","grid connected","grid connection","grid status","стан мережі","мережа"]) };
     }
-    const parts = /^(grid|load|pv|battery|generator)(?:_(l[123]|[12]))?_(power|current|voltage|temperature|soc)(?:_([12]))?$/.exec(key);
+    const parts = /^(grid|load|pv|battery|generator)(?:_(l[123]|[1-6]))?_(power|current|voltage|temperature|soc)(?:_([12]))?$/.exec(key);
     if (!parts) return null;
     const [, source, qualifier, metric, trailingBank] = parts;
     const qualifierKey = qualifier || trailingBank;
@@ -2525,6 +2539,10 @@
         return [{ leaf, group, subgroup:field.schema ? field : null, matches, suggestions }];
       }),
     ));
+    // PV1…PV6 are offered only when there is no total solar power for this inverter.
+    const pvKey = groups.flatMap(group => group.schema.flatMap(editorLeaves)).map(leaf => leaf.name).find(name => /^(inverter_\d_)?pv_power$/.test(name));
+    const pvTotalFound = hasEditorBinding(config[pvKey]) || plan.some(row => row.leaf.name === pvKey && row.matches.length);
+    if (pvTotalFound) plan.splice(0, plan.length, ...plan.filter(row => !/^(inverter_\d_)?pv_[1-6]_power$/.test(row.leaf.name)));
     // Three tiers: one sure match is proposed; several, or a suggestion, are offered for the user to choose; none stays manual.
     return plan.map(row => {
       const [candidate] = row.matches;
