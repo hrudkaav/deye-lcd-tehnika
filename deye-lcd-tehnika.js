@@ -9,7 +9,7 @@
   const legacyCardTag = "deye-lcd-8k";
   if (customElements.get(cardTag)) return;
 
-  const version = "Alpha 0.8.13";
+  const version = "Alpha 0.8.14";
   const models = [3, 5, 6, 8, 10, 12, 15, 20, 30, 80, 160];
   const defaultModel = 8;
   const themes = [
@@ -162,8 +162,8 @@
         label("Zero-export Power", "Нульовий експорт", 167, 156, 128),
         number("zero_export_power", "Zero-export Power", "Потужність нульового експорту", 295, 150, 45),
         label("Energy pattern", "Пріоритет", 9, 194, 109),
-        radio("energy_pattern", "battery", "Batt First", "АКБ", 123, 193, 102),
-        radio("energy_pattern", "load", "Load First", "Навантаження", 234, 193, 105),
+        radio("energy_pattern", "battery", "Batt First", "АКБ", 116, 193, 96),
+        radio("energy_pattern", "load", "Load First", "Навантаження", 214, 193, 128),
         toggle("grid_peak_shaving", "Grid Peak Shaving", "Шейвінг мережі", 10, 232, 158, 27),
         number("grid_peak_shaving_power", "Power", "Ліміт шейвінгу мережі", 171, 232, 69, "W"),
         label("Power", "Потужність", 243, 234, 96),
@@ -872,6 +872,11 @@
         </button>
         <h2 id="details-title" tabindex="-1"></h2>
       </header>
+      <div class="details-runtime" data-runtime hidden>
+        <span class="details-runtime-label" data-runtime-label></span>
+        <strong class="details-runtime-value" data-runtime-value>—</strong>
+        <small class="details-runtime-note" data-runtime-note></small>
+      </div>
       <dl class="details-readings">
         ${measurementFields.map(({ key, label }) => `<div class="details-metric" data-metric="${key}">
           <dt>${translated(pair(metricEnglish[key], label))}</dt>
@@ -1696,6 +1701,14 @@
     .details-back svg { width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
     .details-back:focus-visible { outline:2px solid var(--details-focus); outline-offset:2px; }
     .details-header h2:focus { outline:0; }
+    .details-runtime {
+      display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:baseline; gap:2px 10px;
+      margin:9px 9px 0; padding:7px 10px 8px; border:1px solid var(--details-metric-edge); border-radius:4px;
+      background:var(--details-metric-face);
+    }
+    .details-runtime-label { color:var(--details-muted); font-size:clamp(11px,3.1cqi,15px); }
+    .details-runtime-value { font-size:clamp(16px,5cqi,24px); font-weight:700; font-variant-numeric:tabular-nums; text-align:end; }
+    .details-runtime-note { grid-column:1 / -1; color:var(--details-muted); font-size:clamp(10px,2.8cqi,13px); }
     .details-readings { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:5px; margin:9px 9px 7px; }
     .details-screen[data-source="battery"] .details-readings { grid-template-columns:repeat(4,minmax(0,1fr)); }
     .details-metric {
@@ -2310,6 +2323,17 @@
       ], "legacy", t("Choose only measured, distinct sensors. Do not add a total to its component channels.",
         "Обирайте окремі виміряні датчики. Не додавайте сумарний показ до його складових каналів.")),
       bool("battery_power_x2", t("Multiply battery power ×2", "Множити потужність АКБ ×2")),
+      field({ name:"battery_runtime_capacity_kwh", selector:{ number:{ min:0.1, max:5000, step:0.1, mode:"box", unit_of_measurement:"kWh" } } },
+        t("Battery runtime · usable capacity, kWh", "Час роботи від АКБ · ємність, кВт·год"),
+        t("Used to estimate runtime in the battery details. Leave empty to take it from a capacity sensor or from Ah × battery voltage.",
+          "Для розрахунку часу роботи у вікні АКБ. Якщо порожньо — береться з сенсора ємності або як А·год × напруга АКБ.")),
+      field({ name:"battery_runtime_cutoff", selector:{ number:{ min:0, max:90, step:1, mode:"box", unit_of_measurement:"%" } } },
+        t("Battery runtime · count down to, %", "Час роботи від АКБ · рахувати до, %"),
+        t("Charge level at which the battery is treated as empty. Leave empty to use the inverter Shutdown setting, or 20 %.",
+          "Заряд, на якому АКБ вважається розрядженою. Якщо порожньо — береться «Поріг вимкнення» інвертора, інакше 20 %.")),
+      entity("battery_capacity_sensor", t("Battery runtime · capacity sensor (kWh)", "Час роботи від АКБ · сенсор ємності (кВт·год)"), "sensor",
+        t("For example the Solarman «Battery Capacity» sensor in kWh. Check that it shows the full capacity, not the remaining energy.",
+          "Наприклад, сенсор Solarman «Battery Capacity» у кВт·год. Перевірте, що він показує повну ємність, а не залишок.")),
       choose("generator_power_mode", t("Generator power source", "Джерело потужності генератора"), [
         ["total", "Один сумарний датчик", "One total sensor"],
         ["inverters", "Сума датчиків усіх інверторів", "Sum of inverter sensors"],
@@ -3110,6 +3134,10 @@
       this.detailsScreen = select(".details-screen");
       this.detailsTitle = select("#details-title");
       this.detailsReadings = select(".details-readings");
+      this.runtimeBox = select("[data-runtime]");
+      this.runtimeLabel = select("[data-runtime-label]");
+      this.runtimeValue = select("[data-runtime-value]");
+      this.runtimeNote = select("[data-runtime-note]");
       this.historyHeading = select("#details-history-title");
       this.historyToggle = select("[data-history-toggle]");
       this.historyToggle.addEventListener("click", () => this.setDetailsSplit(true));
@@ -3604,6 +3632,70 @@
         ? this.t("Open the individual readings when a combined value is unavailable.", "Окремі покази доступні в таблиці нижче.") : "";
     }
 
+    batteryCapacity(states) {
+      // Order: the value typed in the editor, separate banks, a kWh sensor, then Ah × battery voltage.
+      const manual = Number(this.config.battery_runtime_capacity_kwh);
+      if (Number.isFinite(manual) && manual > 0) return { kwh:manual, source:"manual" };
+      if (batterySeparate(this.config) && this.inverterCount > 1) {
+        const banks = installedInverters(this.config).map(index => Number(this.config[inverterField(index, "battery_soc_capacity_kwh")]));
+        if (banks.every(value => Number.isFinite(value) && value > 0)) return { kwh:banks.reduce((a, b) => a + b, 0), source:"banks" };
+      }
+      const sensor = states[this.config.battery_capacity_sensor];
+      const amount = reading(sensor);
+      if (amount !== null && amount > 0) {
+        const unit = String(sensor.attributes?.unit_of_measurement ?? "kWh").trim().toLowerCase();
+        const factor = { kwh:1, "квт·год":1, wh:0.001, "вт·год":0.001, mwh:1000 }[unit];
+        if (factor) return { kwh:amount * factor, source:"sensor" };
+      }
+      const ah = reading(states[this.config.battery_capacity]);
+      const volts = reading(states[this.config.battery_voltage]);
+      if (ah !== null && ah > 0 && volts !== null && volts > 0) return { kwh:ah * volts / 1000, source:"ah" };
+      return null;
+    }
+
+    runtimeCutoff(states) {
+      const custom = this.config.battery_runtime_cutoff;
+      if (custom !== undefined && custom !== null && custom !== "" && Number.isFinite(Number(custom))) return Math.min(95, Math.max(0, Number(custom)));
+      const shutdown = states[this.config.battery_shutdown];
+      const unit = String(shutdown?.attributes?.unit_of_measurement ?? "").trim();
+      const value = reading(shutdown);
+      return unit === "%" && value !== null && value >= 0 && value < 100 ? value : 20;
+    }
+
+    formatDuration(minutes) {
+      if (minutes >= 48 * 60) return this.t("over 2 days", "понад 2 доби");
+      const hours = Math.floor(minutes / 60), rest = Math.round(minutes % 60);
+      const h = hours + (rest === 60 ? 1 : 0), m = rest === 60 ? 0 : rest;
+      if (!h) return this.t(`${m} min`, `${m} хв`);
+      return m ? this.t(`${h} h ${m} min`, `${h} год ${m} хв`) : this.t(`${h} h`, `${h} год`);
+    }
+
+    renderRuntime(states) {
+      const raw = powerTotal(powerSources(this.config, gaugeByKey.battery_power), states);
+      const power = raw === null ? null : raw * (this.config.battery_power_x2 === true ? 2 : 1);
+      const soc = this.runtimeSoc ?? null;
+      const capacity = this.batteryCapacity(states);
+      const cutoff = this.runtimeCutoff(states);
+      const english = preferEnglish(this.config);
+      const number = value => (english ? englishMeasurementFormat : measurementFormat).format(Math.round(value * 10) / 10);
+      const charging = power !== null && power < 0;
+      this.runtimeLabel.textContent = charging ? this.t("Time to full charge", "До повного заряду") : this.t("Battery runtime", "Час роботи від АКБ");
+      let value = "—", note;
+      if (!capacity) note = this.t("Set the battery capacity in the card editor (General).", "Вкажіть ємність АКБ у редакторі картки (вкладка «Загальне»).");
+      else if (power === null || soc === null) note = this.t("Battery power or charge is unavailable.", "Немає даних про потужність або заряд АКБ.");
+      else if (Math.abs(power) < 50) note = this.t("The battery is idle.", "АКБ у спокої.");
+      else if (charging) {
+        value = soc >= 100 ? this.t("Full", "Заряджено") : this.formatDuration(capacity.kwh * (100 - soc) / 100 / (-power / 1000) * 60);
+        note = this.t(`to 100 % · ${number(capacity.kwh)} kWh · at the current power`, `до 100 % · ${number(capacity.kwh)} кВт·год · за поточною потужністю`);
+      } else {
+        value = soc <= cutoff ? this.t("Threshold reached", "Поріг досягнуто") : this.formatDuration(capacity.kwh * (soc - cutoff) / 100 / (power / 1000) * 60);
+        note = this.t(`down to ${number(cutoff)} % · ${number(capacity.kwh)} kWh · at the current power`, `до ${number(cutoff)} % · ${number(capacity.kwh)} кВт·год · за поточною потужністю`);
+      }
+      this.runtimeValue.textContent = value;
+      this.runtimeNote.textContent = note;
+      this.runtimeBox.toggleAttribute("data-charging", charging && value !== "—");
+    }
+
     updateDetails() {
       const gauge = gaugeByKey[this.detailsKey];
       const states = this.hassData?.states ?? {};
@@ -3618,6 +3710,8 @@
       const canSplit = count > 1;
       this.historyToggle.hidden = !canSplit || this.detailsSplit;
       this.detailsReadings.hidden = this.detailsSplit;
+      this.runtimeBox.hidden = !isBattery || this.detailsSplit;
+      if (!this.runtimeBox.hidden) this.renderRuntime(states);
       this.historyHeading.textContent = this.detailsSplit ? this.t("Power by inverter · 24 h", "Потужність по інверторах · 24 год")
         : canSplit ? this.t("Combined power · 24 h", "Загальна потужність · 24 год") : this.t("Power over 24 h", "Потужність за 24 год");
       const idsFor = (metric, phase = "") => metric === "power" && !phase ? sources
@@ -4470,6 +4564,7 @@
       const shown = !separate ? primary : weighted ? weightedSoc : null;
       const lowest = separate && !weighted && banks.every(bank => bank.charge !== null) ? Math.min(...banks.map(bank => bank.charge)) : null;
       level(this.socLabel, shown ?? lowest);
+      this.runtimeSoc = shown ?? lowest;
     }
 
     update() {
