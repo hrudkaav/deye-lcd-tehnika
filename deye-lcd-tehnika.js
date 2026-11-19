@@ -9,7 +9,7 @@
   const legacyCardTag = "deye-lcd-8k";
   if (customElements.get(cardTag)) return;
 
-  const version = "Alpha 0.8.22";
+  const version = "Alpha 0.8.23";
   const models = [3, 5, 6, 8, 10, 12, 15, 20, 30, 80, 160];
   const defaultModel = 8;
   const themes = [
@@ -18,7 +18,7 @@
   ];
   const manualAppearances = ["light", "dark"];
   const visualValues = { lcd_theme:["classic","technika"], lcd_palette:["olive","graphite"],
-    lcd_appearance:["light","dark","auto"], lcd_auto_source:["ha","sun","device"] };
+    lcd_appearance:["light","dark","auto"], lcd_auto_source:["ha","sun","device"], lcd_particles:["dot","glow","packet"] };
   const threePhaseValues = ["3", 3];
   const acSources = ["grid", "load"];
   const screenWhite = "#ffffff";
@@ -798,20 +798,6 @@
       <path class="technika-only technika-arrow ${direction}" d="M${x} ${y}L${tail} ${y - 3.8}L${notch} ${y}L${tail} ${y + 3.8}Z"/>`;
   }
 
-  function technikaParticle(path, direction, index) {
-    const keyPoints = direction === "forward" ? "0;1" : "1;0";
-    const begin = (index * 0.04 - 0.16).toFixed(2);
-    return `<g class="technika-only technika-particle ${direction}" opacity="0" aria-hidden="true">
-      <circle r="4.65" class="particle-halo" opacity=".16"/>
-      <circle r="3.65" class="particle-halo" opacity=".25"/>
-      <circle r="2.92" class="particle-edge"/>
-      <circle r="2.23" class="particle-body"/>
-      <circle r="1.02" cx="-.61" cy="-.69" fill="#f6fcea"/>
-      <animateMotion begin="${begin}s" dur="2s" path="${path}" calcMode="linear" keyTimes="0;1" keyPoints="${keyPoints}" repeatCount="indefinite"/>
-      <animate begin="${begin}s" dur="2s" attributeName="opacity" values=".67;1;1;.67" keyTimes="0;.07;.94;1" repeatCount="indefinite"/>
-    </g>`;
-  }
-
   function wire({ name, from, bendX, to }, index) {
     const path = `M${from.join(" ")}H${bendX}V${to[1]}H${to[0]}`;
     return `<g class="wire" data-wire="${name}" data-flow="off">
@@ -819,7 +805,7 @@
       ${flowArrows(to, bendX, "forward")}${flowArrows(from, bendX, "backward")}
       <circle class="classic-only dot forward" r="2.8"><animateMotion dur="2s" path="${path}" repeatCount="indefinite"/></circle>
       <circle class="classic-only dot backward" r="2.8"><animateMotion dur="2s" path="${path}" repeatCount="indefinite" calcMode="linear" keyTimes="0;1" keyPoints="1;0"/></circle>
-      ${technikaParticle(path, "forward", index)}${technikaParticle(path, "backward", index)}
+      <g class="technika-only flow-layer" aria-hidden="true"></g>
       ${name === "grid" ? `<g class="grid-outage" role="img" aria-label="Мережу від’єднано">
         <text x="259" y="77">Off grid</text>
         <path d="M254 102h10v13h-10z" fill="${screenWhite}"/>
@@ -1679,8 +1665,12 @@
     .technika-arrow,.particle-halo { fill:var(--flow); }
     .particle-edge { fill:var(--flow-edge); }
     .particle-body { fill:var(--flow-body); }
+    .flow-glow-halo { fill:var(--flow); }
+    .flow-core { fill:#fbfff2; }
+    .flow-tail { fill:none; stroke:var(--flow); stroke-linecap:round; }
+    .flow-spark { fill:var(--flow); }
     @media (prefers-reduced-motion:reduce) {
-      :host([data-theme="technika"]) .technika-particle { display:none; }
+      :host([data-theme="technika"]) .flow-layer { display:none; }
     }
 
     .details-screen {
@@ -3903,11 +3893,14 @@
       this.updateClock();
       clearInterval(this.timer);
       this.timer = setInterval(() => this.updateClock(), 1000);
+      this.syncFlowEngine();
     }
 
     disconnectedCallback() {
       this.deviceColorScheme?.removeEventListener?.("change", this.onDeviceColorSchemeChange);
       clearInterval(this.timer);
+      if (this.flowFrame) cancelAnimationFrame(this.flowFrame);
+      this.flowFrame = 0;
       this.closeDetails();
       this.closeSettings();
       this.closeAppearance(false);
@@ -3984,7 +3977,7 @@
     }
 
     resetVisualPreferences() {
-      this.visualPreferences = { lcd_theme:"classic", lcd_palette:"olive", lcd_appearance:"auto", lcd_auto_source:"ha" };
+      this.visualPreferences = { lcd_theme:"classic", lcd_palette:"olive", lcd_appearance:"auto", lcd_auto_source:"ha", lcd_particles:"dot" };
       this.saveVisualPreferences();
     }
 
@@ -4047,7 +4040,9 @@
             <div class="ap-swatches" role="group" aria-labelledby="ap-palette">
               ${button("lcd_palette", "olive", "", ` aria-label="${t("Olive", "Олива")}"`)}${button("lcd_palette", "graphite", "", ` aria-label="${t("Graphite", "Графіт")}"`)}
               <span>${palette}</span>
-            </div>` : ""}
+            </div>
+            ${row("particles", t("Flow", "Потоки"),
+              button("lcd_particles", "dot", t("Dot", "Крапка")) + button("lcd_particles", "glow", t("Glow", "Світло")) + button("lcd_particles", "packet", t("Packet", "Пакет")))}` : ""}
           ${row("mode", t("Look", "Вигляд"),
             button("lcd_appearance", "light", icon.light, ` aria-label="${t("Light", "Світле")}"`) +
             button("lcd_appearance", "dark", icon.dark, ` aria-label="${t("Dark", "Темне")}"`) +
@@ -4143,6 +4138,17 @@
         return;
       }
       const isPower = metric.key === "power";
+      if (["temperature", "voltage"].includes(metric.key) && ids.length > 1) {
+        // Parallel banks: the hottest battery is what matters for temperature; voltage is the average.
+        const values = ids.map(({ id }) => reading(states[id])).filter(Number.isFinite);
+        const value = !values.length ? null : metric.key === "temperature" ? Math.max(...values) : values.reduce((a, b) => a + b, 0) / values.length;
+        const english = preferEnglish(this.config);
+        metric.value.textContent = value === null ? "—" : (english ? englishMeasurementFormat : measurementFormat).format(Math.round(value * 10) / 10);
+        metric.unitText.textContent = value === null ? "" : metric.key === "temperature" ? "°C" : this.t("V", "В");
+        metric.row.title = value === null ? this.t("Open the individual readings when a combined value is unavailable.", "Окремі покази доступні в таблиці нижче.")
+          : metric.key === "temperature" ? this.t("Highest of the batteries", "Найвища з АКБ") : this.t("Average of the batteries", "Середня по АКБ");
+        return;
+      }
       const total = isPower ? powerTotal(ids, states, gauge.source === "pv")
         : metric.key === "current" && (acSources.includes(gauge.source) || gauge.source === "generator" || gauge.source === "battery" && this.config.battery_power_mode === "channels") ? currentTotal(ids.map(({ id }) => id), states)
           : null;
@@ -5044,6 +5050,105 @@
     setFlow(name, power) {
       const direction = power === null || Math.abs(power) < flowThreshold ? "off" : power > 0 ? "forward" : "backward";
       this.wires[name].dataset.flow = direction;
+      (this.flowPower ??= {})[name] = power === null ? 0 : Math.abs(power);
+      this.syncFlowEngine();
+    }
+
+    syncFlowEngine() {
+      const reduce = typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+      const active = this.isConnected && this.dataset.theme === "technika" && !reduce && this.wires
+        && Object.values(this.wires).some(wire => wire?.dataset.flow !== "off");
+      if (active && !this.flowFrame) {
+        this.flowLast = performance.now();
+        this.flowFrame = requestAnimationFrame(now => this.flowTick(now));
+      } else if (!active && this.flowFrame) {
+        cancelAnimationFrame(this.flowFrame);
+        this.flowFrame = 0;
+      }
+      if (!active && this.wires) for (const wire of Object.values(this.wires)) wire?.querySelector(".flow-layer")?.replaceChildren();
+    }
+
+    flowTick(now) {
+      this.flowFrame = 0;
+      const dt = Math.min(.1, Math.max(0, (now - this.flowLast) / 1000));
+      this.flowLast = now;
+      const style = this.visualConfig().lcd_particles ?? "dot";
+      const appearance = this.dataset.appearance;
+      const svg = "http://www.w3.org/2000/svg";
+      const make = (tag, attrs) => { const node = document.createElementNS(svg, tag); for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v); return node; };
+      // Speed and the number of particles follow the power on each line: a quiet line crawls, a busy one streams.
+      for (const [name, wire] of Object.entries(this.wires ?? {})) {
+        const layer = wire?.querySelector(".flow-layer");
+        if (!layer) continue;
+        const direction = wire.dataset.flow;
+        if (direction === "off") { if (layer.firstChild) layer.replaceChildren(); continue; }
+        const state = (this.flowState ??= {})[name] ??= { phase:Math.random(), sparks:[] };
+        const track = wire.querySelector(".wire-track");
+        if (!state.length || state.track !== track) { state.track = track; state.length = track.getTotalLength(); }
+        const share = Math.min(1, Math.max(.05, (this.flowPower?.[name] ?? 0) / Math.max(1, (this.scale || 1) * 1000)));
+        const duration = 3.4 - 2.2 * share;
+        const count = Math.max(1, Math.round(1 + share * 3));
+        state.phase = (state.phase + dt / duration) % 1;
+        const key = `${style}|${count}|${appearance}`;
+        if (layer.dataset.key !== key) {
+          layer.dataset.key = key;
+          layer.replaceChildren();
+          state.sparks = [];
+          for (let index = 0; index < count; index++) {
+            if (style === "glow") {
+              const group = make("g", {});
+              const halo = make("g", {});
+              for (const [r, o] of [[8.6, .12], [6.2, .2], [4.3, .34]]) halo.append(make("circle", { r, class:"flow-glow-halo", opacity:o }));
+              group.append(halo, make("circle", { r:2.1, class:"flow-core" }));
+              layer.append(group);
+            } else if (style === "packet") {
+              const group = make("g", {});
+              group.append(make("path", { class:"flow-tail", "stroke-width":3.4, opacity:.35 }), make("path", { class:"flow-tail", "stroke-width":2.6 }),
+                make("circle", { r:1.9, class:"flow-core" }));
+              layer.append(group);
+            } else {
+              const group = make("g", { class:"technika-particle", filter:`url(#deye-technika-dot-${appearance})` });
+              group.innerHTML = '<circle r="4.65" class="particle-halo" opacity=".16"/><circle r="3.65" class="particle-halo" opacity=".25"/><circle r="2.92" class="particle-edge"/><circle r="2.23" class="particle-body"/><circle r="1.02" cx="-.61" cy="-.69" fill="#f6fcea"/>';
+              layer.append(group);
+            }
+          }
+          if (style === "packet") for (let index = 0; index < 8; index++) layer.append(make("circle", { r:.9, class:"flow-spark", opacity:0 }));
+        }
+        const sign = direction === "forward" ? 1 : -1;
+        const at = (distance) => track.getPointAtLength(Math.min(state.length, Math.max(0, distance)));
+        for (let index = 0; index < count; index++) {
+          const node = layer.children[index];
+          const t = (state.phase + index / count) % 1;
+          const distance = state.length * (sign > 0 ? t : 1 - t);
+          const point = at(distance);
+          const alpha = Math.min(1, t * 7, (1 - t) * 7).toFixed(3);
+          node.setAttribute("opacity", alpha);
+          if (style === "packet") {
+            const tail = [5, 4, 3, 2, 1, 0].map(step => at(distance - sign * 15 * step / 5));
+            const near = tail.slice(3);
+            node.children[0].setAttribute("d", "M" + tail.map(p => `${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join("L"));
+            node.children[1].setAttribute("d", "M" + near.map(p => `${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join("L"));
+            node.children[2].setAttribute("cx", point.x.toFixed(1));
+            node.children[2].setAttribute("cy", point.y.toFixed(1));
+            if (Math.random() < .25 && state.sparks.length < 8) state.sparks.push({ x:point.x, y:point.y, vx:(Math.random() - .5) * 26, vy:(Math.random() - .5) * 26, life:1 });
+          } else {
+            node.setAttribute("transform", `translate(${point.x.toFixed(2)} ${point.y.toFixed(2)})`);
+            if (style === "glow") node.firstChild.setAttribute("transform", `scale(${(.82 + .18 * Math.sin(now / 150 + index * 2)).toFixed(3)})`);
+          }
+        }
+        if (style === "packet") {
+          const pool = [...layer.children].slice(count);
+          state.sparks = state.sparks.filter(spark => (spark.life -= dt * 2.6) > 0);
+          pool.forEach((circle, index) => {
+            const spark = state.sparks[index];
+            if (!spark) { circle.setAttribute("opacity", 0); return; }
+            spark.x += spark.vx * dt; spark.y += spark.vy * dt;
+            circle.setAttribute("cx", spark.x.toFixed(1)); circle.setAttribute("cy", spark.y.toFixed(1));
+            circle.setAttribute("opacity", spark.life.toFixed(2));
+          });
+        }
+      }
+      if (this.isConnected) this.flowFrame = requestAnimationFrame(next => this.flowTick(next));
     }
 
     updateStatus(states, readings) {
