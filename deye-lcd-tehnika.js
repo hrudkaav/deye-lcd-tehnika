@@ -9,7 +9,7 @@
   const legacyCardTag = "deye-lcd-8k";
   if (customElements.get(cardTag)) return;
 
-  const version = "Alpha 0.8.27";
+  const version = "Alpha 0.8.28";
   const currentVersion = version.replace(/^[^\d]*/, "");
   const models = [3, 5, 6, 8, 10, 12, 15, 20, 30, 80, 160];
   const defaultModel = 8;
@@ -27,6 +27,14 @@
   const storeLanguage = (value) => {
     try { localStorage.setItem(languageKey, value === "en" ? "en" : "uk"); } catch { /* kept for this page only */ }
     window.dispatchEvent(new CustomEvent(languageEvent, { detail:value }));
+  };
+  // Frame of the ТЕХНіКА cards: one switch shared with the «Графік відключень · ТЕХНіКА» card.
+  const frameKey = "tehnika-cards:frame";
+  const frameEvent = "tehnika-cards-frame";
+  const storedFrame = () => { try { return localStorage.getItem(frameKey) === "off" ? "off" : "on"; } catch { return "on"; } };
+  const storeFrame = (value) => {
+    try { localStorage.setItem(frameKey, value === "off" ? "off" : "on"); } catch { /* this page only */ }
+    window.dispatchEvent(new CustomEvent(frameEvent, { detail:value }));
   };
   // Release check: the card asks GitHub at most every two hours and shares the answer between its copies on the page.
   const releaseUrl = "https://api.github.com/repos/hrudkaav/deye-lcd-tehnika/releases/latest";
@@ -159,7 +167,7 @@
         label("Experimental · the inverter may ignore it", "Експериментально · інвертор може не виконати команду", 31, 236, 309, "start", 27, 2.8),
       ], ["generator_charge_start_soc", "generator_charge_start_voltage", "grid_charge_start_soc", "grid_charge_start_voltage", "charging_signal"]),
       page(null, pair("Batt Set3", "АКБ 3"), [
-        label("Lithium Mode", "Режим літієвої АКБ", 12, 64, 119),
+        label("Lithium Mode", "Режим літієвої АКБ", 12, 57, 119, "start", 32, 3.1),
         { ...option("battery_lithium_mode", "Lithium Mode", "Режим літієвої АКБ", 135, 60, 98), domain: ["select", "number"] },
         readout("battery_lithium_profile", "BMS profile", "Профіль BMS", 248, 62, 96),
         label("Shutdown", "Вимкнення", 12, 106, 119),
@@ -721,9 +729,10 @@
     battery: `
       <g stroke-width="1.08" stroke-linecap="round" stroke-linejoin="round">
         <rect x="-20" y="-9" width="38" height="19" rx="3.5" fill="url(#deye-technika-icon-light)" stroke="#3e4929" stroke-width="1.6"/>
+        <rect class="bat-fill" x="-18.4" y="-7.4" width="0" height="15.8" clip-path="url(#deye-bat-clip)" stroke="none"/>
+        <path class="bat-glass" d="M-17.5-6.8h33.2q1 0 1 1v2.2q-17.6 2.6-35.2 0v-2.2q0-1 1-1z" fill="#fff" opacity=".38" stroke="none"/>
         <path d="M18-3h4v7h-4z" fill="#486F59" stroke="#3e4929"/>
-        <path d="M-16.6-6.3h31" fill="none" stroke="#f3f5dc"/>
-        <path class="battery-bolt" d="M2.3-6-6.6 1.5h6L-2.1 7l8.9-8.6H1z" fill="url(#deye-technika-icon-dark)"/>
+        <path class="battery-bolt" d="M2.3-6-6.6 1.5h6L-2.1 7l8.9-8.6H1z" fill="url(#deye-technika-icon-dark)" stroke="#fff" stroke-width=".9" paint-order="stroke"/>
       </g>`,
     house: `
       <g stroke-width="1.08" stroke-linecap="round" stroke-linejoin="round">
@@ -796,6 +805,7 @@
       <path class="technika-only" d="${track}" fill="none" stroke="#3e423e" stroke-width="9" stroke-linecap="round" aria-hidden="true"/>
       <path class="track" d="${track}"/>
       <path class="fill" fill="none" stroke="url(#deye-lcd-arc)"/>
+      <path class="technika-only fill-gloss" fill="none" stroke="url(#deye-technika-gloss)" stroke-width="8.4" stroke-linecap="round" aria-hidden="true"/>
       <g class="symbol ${isBattery ? "single-battery" : ""}" transform="translate(0 ${isBattery ? "11" : "0"})">${dialIcon(icon)}</g>
       ${isBattery ? `<g class="dual-battery">
         <g class="symbol" transform="translate(0 4) scale(1.45)">${dialIcon("dual")}</g>
@@ -1939,7 +1949,7 @@
     :host([data-appearance="dark"]) .screen [role="button"]:focus-visible .hit { stroke:var(--dark-mark); }
 
     :host([data-theme="technika"][data-appearance="dark"]) .gauge > circle.technika-only { stroke:#899875; }
-    :host([data-theme="technika"][data-appearance="dark"]) .gauge > path.technika-only { stroke:#121416; }
+    :host([data-theme="technika"][data-appearance="dark"]) .gauge > path.technika-only:not(.fill-gloss) { stroke:#121416; }
     :host([data-theme="technika"][data-appearance="dark"]) .status-ring { stroke:#dcf597; }
     :host([data-theme="technika"][data-appearance="dark"]) .grid-outage [fill="#ffffff"] { fill:#222426; }
     :host([data-theme="technika"][data-appearance="dark"]) .technika-gear-light { display:none; }
@@ -2048,6 +2058,40 @@
     :host([data-palette="graphite"][data-appearance="dark"]) #deye-t-fill stop:nth-child(1) { stop-color:#5a6467; }
     :host([data-palette="graphite"][data-appearance="dark"]) #deye-t-fill stop:nth-child(2) { stop-color:#272f33; }
     /* A newer release: ТЕХНіКА gets a slowly breathing amber ring, КЛАСіК only a yellow inner ring with no motion. */
+    /* ТЕХНіКА: power gauges in «sunny» colours with a soft volume; SOC colours 50 / 30 %. */
+    .fill-gloss { pointer-events:none; }
+    :host([data-theme="technika"]) .gauge .fill { stroke:url(#deye-technika-power-light); }
+    :host([data-theme="technika"][data-appearance="dark"]) .gauge .fill { stroke:url(#deye-technika-power-dark); }
+    :host([data-theme="technika"]) { --soc-ok:#3a9a22; --soc-mid:#b58900; --soc-low:#d0352a; }
+    :host([data-theme="technika"][data-appearance="dark"]) { --soc-ok:#7fe05a; --soc-mid:#ffd84a; --soc-low:#ff6a55; }
+    :host([data-theme="technika"]) .screen .gauge .soc[data-level="ok"],:host([data-theme="technika"]) .screen .gauge .soc-side[data-level="ok"] { fill:var(--soc-ok); }
+    :host([data-theme="technika"]) .screen .gauge .soc[data-level="mid"],:host([data-theme="technika"]) .screen .gauge .soc-side[data-level="mid"] { fill:var(--soc-mid); }
+    :host([data-theme="technika"]) .screen .gauge .soc[data-level="low"],:host([data-theme="technika"]) .screen .gauge .soc-side[data-level="low"] { fill:var(--soc-low); }
+    /* ТЕХНіКА frame can be switched off (shared with the outage card): the card then has the screen colour and a thin edge. */
+    :host([data-theme="technika"]) { --tk-surface:#e3e6e2; }
+    :host([data-theme="technika"][data-appearance="dark"]) { --tk-surface:#1a1c1e; }
+    :host([data-theme="technika"][data-palette="graphite"]) { --tk-surface:#e4e7e9; }
+    :host([data-theme="technika"][data-palette="graphite"][data-appearance="dark"]) { --tk-surface:#1d2124; }
+    :host([data-theme="technika"][data-frame="off"]) ha-card { background:var(--tk-surface) !important; border-color:var(--technika-frame-edge) !important; box-shadow:none !important; }
+    /* Menu items with no entity: pale, dashed, a «?» badge; a tap explains where to link it. */
+    .lcd-setting[data-unbound] { cursor:help; opacity:.62; }
+    .lcd-setting[data-unbound] .lcd-number-value,.lcd-setting[data-unbound] input { border-style:dashed; }
+    .lcd-setting[data-unbound] input,.lcd-setting[data-unbound] select,.lcd-setting[data-unbound] button { pointer-events:none; }
+    .lcd-setting[data-unbound] select { color:transparent; }
+    .lcd-setting[data-unbound]::after {
+      content:"?"; position:absolute; top:-1.6cqi; right:-1.4cqi; width:3.6cqi; height:3.6cqi; border-radius:50%;
+      display:grid; place-items:center; font:700 2.4cqi/1 var(--lcd-font); background:#8a949c; color:#fff; pointer-events:none;
+    }
+    .native-check[data-unbound]::after { top:50%; right:auto; left:calc(var(--h) * .25cqi - 1.6cqi); transform:translateY(-110%); }
+    .settings .lcd-surface { position:relative; }
+    .unbound-pop {
+      position:absolute; left:5%; right:18%; top:16%; z-index:20; padding:10px 12px; border-radius:10px; max-height:70%; overflow:auto;
+      font:400 clamp(11px,3cqi,13px)/1.35 var(--lcd-font); background:#ffffff; color:#1c2a33; border:1px solid #9fb2be; box-shadow:0 10px 30px #0008;
+    }
+    :host([data-appearance="dark"]) .unbound-pop { background:#13202c; color:#eef4f8; border-color:#5b7d94; }
+    .unbound-pop b { display:block; font-size:1.05em; margin-bottom:4px; }
+    .unbound-pop .unbound-actions { text-align:right; margin-top:8px; }
+    .unbound-pop button { font:inherit; font-weight:600; padding:5px 14px; border-radius:8px; border:1px solid currentColor; background:transparent; color:inherit; cursor:pointer; }
     .t-update-ring { display:none; stroke:#f2a33a; transform-box:fill-box; transform-origin:center; }
     :host([data-update]) .t-update-ring { display:inline; animation:t-update-pulse 2.4s ease-in-out infinite; }
     :host([data-update]) .t-ring-inner { stroke:#e8a317; stroke-width:1.9; opacity:1; }
@@ -2291,8 +2335,8 @@
     :host([data-theme="technika"]) .screen[data-battery-flow="charge"] [data-gauge="battery_power"] .value { fill:var(--sem-charge); }
     :host([data-theme="technika"]) .screen[data-battery-flow="discharge"] [data-gauge="battery_power"] .value { fill:var(--sem-discharge); }
     :host([data-theme="technika"]) .screen[data-grid-flow="export"] [data-gauge="grid_power"] .value { fill:var(--sem-export); }
-    :host([data-theme="technika"]) .screen .gauge .soc[data-level="low"],:host([data-theme="technika"]) .screen .gauge .soc-side[data-level="low"] { fill:var(--sem-low); }
-    :host([data-theme="technika"]) .screen .gauge .soc[data-level="mid"],:host([data-theme="technika"]) .screen .gauge .soc-side[data-level="mid"] { fill:var(--sem-mid); }
+    :host([data-theme="technika"]) .screen .gauge .soc[data-level="low"],:host([data-theme="technika"]) .screen .gauge .soc-side[data-level="low"] { fill:var(--soc-low); }
+    :host([data-theme="technika"]) .screen .gauge .soc[data-level="mid"],:host([data-theme="technika"]) .screen .gauge .soc-side[data-level="mid"] { fill:var(--soc-mid); }
     :host([data-theme="technika"]) .screen[data-battery-flow="charge"] .wire[data-wire="battery"] { --flow:var(--flow-charge); --flow-edge:var(--flow-charge-edge); --flow-body:var(--flow-charge-body); }
     :host([data-theme="technika"]) .screen[data-battery-flow="discharge"] .wire[data-wire="battery"] { --flow:var(--flow-discharge); --flow-edge:var(--flow-discharge-edge); --flow-body:var(--flow-discharge-body); }
     :host([data-theme="technika"]) .screen[data-grid-flow="export"] .wire[data-wire="grid"] { --flow:var(--flow-export); --flow-edge:var(--flow-export-edge); --flow-body:var(--flow-export-body); }
@@ -3747,6 +3791,20 @@
             </linearGradient>
             ${technikaDefinitions}
             <linearGradient id="deye-t-fill" x1="0" y1="0" x2=".3" y2="1"><stop offset="0"/><stop offset="1"/></linearGradient>
+            <linearGradient id="deye-technika-power-light" gradientUnits="userSpaceOnUse" x1="-43" y1="12" x2="37" y2="20">
+              <stop offset="0" stop-color="#4cbf2f"/><stop offset=".25" stop-color="#9fcf1f"/><stop offset=".5" stop-color="#ffc20e"/><stop offset=".75" stop-color="#ff8a1a"/><stop offset="1" stop-color="#e5392b"/>
+            </linearGradient>
+            <linearGradient id="deye-technika-power-dark" gradientUnits="userSpaceOnUse" x1="-43" y1="12" x2="37" y2="20">
+              <stop offset="0" stop-color="#5ad13a"/><stop offset=".25" stop-color="#b0dc28"/><stop offset=".5" stop-color="#ffcc1f"/><stop offset=".75" stop-color="#ff9426"/><stop offset="1" stop-color="#ef4a36"/>
+            </linearGradient>
+            <radialGradient id="deye-technika-gloss" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="45.2">
+              <stop offset=".8142" stop-color="#000" stop-opacity=".18"/><stop offset=".8978" stop-color="#fff" stop-opacity="0"/>
+              <stop offset=".9628" stop-color="#fff" stop-opacity=".32"/><stop offset="1" stop-color="#fff" stop-opacity="0"/>
+            </radialGradient>
+            <clipPath id="deye-bat-clip"><rect x="-18.4" y="-7.4" width="34.8" height="15.8" rx="2.2"/></clipPath>
+            <linearGradient id="deye-bat-ok" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#6fd64a"/><stop offset=".45" stop-color="#4cbf2f"/><stop offset="1" stop-color="#2f8f1f"/></linearGradient>
+            <linearGradient id="deye-bat-mid" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffd84a"/><stop offset=".45" stop-color="#ffc20e"/><stop offset="1" stop-color="#c99400"/></linearGradient>
+            <linearGradient id="deye-bat-low" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ff6a55"/><stop offset=".45" stop-color="#e5392b"/><stop offset="1" stop-color="#a8231a"/></linearGradient>
             <linearGradient id="deye-classic-power" gradientUnits="userSpaceOnUse" x1="-38" y1="0" x2="38" y2="0">
               <stop offset="0" stop-color="#3ccf4e"/><stop offset=".45" stop-color="#b5e03a"/><stop offset=".65" stop-color="#ffd43b"/><stop offset=".82" stop-color="#ff9a2e"/><stop offset="1" stop-color="#ff3b30"/>
             </linearGradient>
@@ -3813,7 +3871,11 @@
       });
       this.appearanceDialog.addEventListener("click", event => {
         const button = event.target.closest("button");
-        if (button?.dataset.updateDismiss !== undefined) {
+        if (button?.dataset.frameToggle) {
+          storeFrame(button.dataset.frameToggle);
+          this.appearanceDialog.querySelector(`[data-frame-toggle="${button.dataset.frameToggle}"]`)?.focus({ preventScroll:true });
+        }
+        else if (button?.dataset.updateDismiss !== undefined) {
           try { localStorage.setItem(updateDismissKey, this.latestRelease?.version ?? ""); } catch { /* shown again next time */ }
           this.refreshUpdateMark();
           this.renderAppearance();
@@ -3874,6 +3936,12 @@
         this.backFromDetails();
       });
       this.settingsScreen = select(".settings");
+      this.settingsScreen.addEventListener("click", event => {
+        if (event.target.closest("[data-unbound-close]")) { this.closeUnboundHelp(); return; }
+        const unbound = event.target.closest(".lcd-setting[data-unbound]");
+        if (unbound) { event.preventDefault(); event.stopPropagation(); this.showUnboundHelp(unbound); return; }
+        if (!event.target.closest(".unbound-pop")) this.closeUnboundHelp();
+      }, true);
       this.settingsTitle = select("#settings-title");
       this.settingsHome = select(".settings-home");
       this.settingsMenu = select(".settings-menu");
@@ -4003,7 +4071,7 @@
       this.gauges = Object.fromEntries(gaugeLayout.map(({ key }) => {
         const element = select(`[data-gauge="${key}"]`);
         onActivate(element, () => this.openDetails(key));
-        return [key, { element, value: element.querySelector(".value"), fill: element.querySelector(".fill"), maximum: element.querySelector("[data-scale]") }];
+        return [key, { element, value: element.querySelector(".value"), fill: element.querySelector(".fill"), gloss: element.querySelector(".fill-gloss"), maximum: element.querySelector("[data-scale]") }];
       }));
     }
 
@@ -4027,6 +4095,7 @@
       const technika = this.visualConfig().lcd_theme === "technika";
       this.dataset.theme = technika ? "technika" : "classic";
       this.dataset.palette = this.visualConfig().lcd_palette === "graphite" ? "graphite" : "olive";
+      this.dataset.frame = storedFrame();
       this.updateAppearance(true);
       this.statusSurface.setAttribute("fill", technika ? "url(#deye-technika-status)" : screenWhite);
       this.scale = installedInverters(config).reduce((total, index) =>
@@ -4097,6 +4166,10 @@
       this.timer = setInterval(() => this.updateClock(), 1000);
       this.onLanguage ??= () => { if (this.sourceConfig) this.setConfig(this.sourceConfig); };
       window.addEventListener(languageEvent, this.onLanguage);
+      this.onFrame ??= () => { this.dataset.frame = storedFrame(); if (!this.appearanceDialog.hidden) this.renderAppearance(); };
+      this.onFrameStorage ??= (event) => { if (event.key === frameKey) this.onFrame(); };
+      window.addEventListener(frameEvent, this.onFrame);
+      window.addEventListener("storage", this.onFrameStorage);
       this.syncFlowEngine();
       this.checkForUpdate();
       clearInterval(this.releaseTimer);
@@ -4109,6 +4182,8 @@
       if (this.flowFrame) cancelAnimationFrame(this.flowFrame);
       this.flowFrame = 0;
       if (this.onLanguage) window.removeEventListener(languageEvent, this.onLanguage);
+      if (this.onFrame) window.removeEventListener(frameEvent, this.onFrame);
+      if (this.onFrameStorage) window.removeEventListener("storage", this.onFrameStorage);
       clearInterval(this.releaseTimer);
       this.closeDetails();
       this.closeSettings();
@@ -4316,7 +4391,10 @@
               <span>${palette}</span>
             </div>
             ${row("particles", t("Flow", "Потоки"),
-              button("lcd_particles", "dot", t("Dot", "Крапка")) + button("lcd_particles", "glow", t("Glow", "Світло")) + button("lcd_particles", "packet", t("Packet", "Пакет")))}` : ""}
+              button("lcd_particles", "dot", t("Dot", "Крапка")) + button("lcd_particles", "glow", t("Glow", "Світло")) + button("lcd_particles", "packet", t("Packet", "Пакет")))}
+            ${row("frame", t("Frame", "Рамка"),
+              `<button type="button" data-frame-toggle="on" aria-pressed="${storedFrame() === "on"}">${t("On", "Увімк.")}</button>` +
+              `<button type="button" data-frame-toggle="off" aria-pressed="${storedFrame() === "off"}">${t("Off", "Вимк.")}</button>`)}` : ""}
         </div>
         <div class="ap-footer">
           <div class="ap-flags" role="group" aria-label="${t("Language", "Мова")}">${flag("uk", "Українська", ukraine)}${flag("en", "English", britain)}</div>
@@ -4777,6 +4855,7 @@
     }
 
     closeSettings() {
+      this.closeUnboundHelp();
       if (this.settingsScreen.hidden) return;
       this.settingsSession++;
       this.settingsScreen.hidden = true;
@@ -5044,6 +5123,8 @@
     }
 
     renderSettings() {
+      const pop = this.settingsScreen.querySelector(".unbound-pop");
+      if (pop && pop.dataset.page !== `${this.settingsMenuId}:${this.settingsPage}`) pop.remove();
       const menu = settingsMenus.find(({ id }) => id === this.settingsMenuId);
       const page = menu ? this.settingsPanels.get(`${menu.id}:${this.settingsPage}`) : null;
       const descriptor = menu?.pages[this.settingsPage];
@@ -5102,7 +5183,8 @@
       this.renderReadouts(page.readouts);
       this.viewOnlyLabel.hidden = this.canEditSettings() || !page.fields.size;
       this.readOnlyMenuLabel.hidden = !readOnlyMenu || !page.fields.size;
-      this.noSettingsLabel.hidden = connected || !page.fields.size;
+      // Unlinked items are marked on the fields themselves, so the card keeps its height.
+      this.noSettingsLabel.hidden = true;
       this.settingsApply.disabled = !dirty || blocked || this.savingSettings;
       const message = this.settingsNotice || (this.savingSettings ? this.t("Sending changes…", "Надсилаю зміни…") : waiting
         ? this.t("Waiting for the Home Assistant state…", "Очікую оновлення стану в Home Assistant…") : expired
@@ -5150,9 +5232,50 @@
         button.disabled = input.disabled || !Number.isFinite(step) || step <= 0;
       }
       element.toggleAttribute("data-unavailable", !available);
+      element.toggleAttribute("data-unbound", !setting.locked && !this.settingBound(element.dataset.setting));
       element.toggleAttribute("data-dirty", Boolean(draft));
       element.toggleAttribute("data-locked", Boolean(setting.locked));
       if (setting.locked) element.title = this.t("Locked for safety: factory reset is never sent from the card.", "Заблоковано з міркувань безпеки: скидання налаштувань з картки не надсилається.");
+    }
+
+    settingBound(name) {
+      // A menu item counts as linked when its own entity or one that drives it (shared selector, volts, date-time) is set.
+      const config = this.config ?? {};
+      const related = [name, `${name}_voltage`];
+      const slot = /^tou_(\d)_(grid_charge|gen_charge|battery)$/.exec(name);
+      if (slot) related.push(slot[2] === "battery" ? `tou_${slot[1]}_battery_voltage` : `tou_${slot[1]}_charge`);
+      if (/^tou_(mon|tue|wed|thu|fri|sat|sun)$/.test(name)) related.push("time_of_use");
+      if (/^basic_(year|month|day|hour|minute)$/.test(name)) related.push("basic_datetime");
+      if (/^(generator|grid)_signal$/.test(name)) related.push("charging_signal");
+      if (name === "battery_mode") related.push("battery_control_mode", "battery_operation_mode");
+      if (name === "generator_start" || name === "grid_start") {
+        const base = name.replace("_start", "_charge_start");
+        related.push(`${base}_soc`, `${base}_voltage`);
+      }
+      return related.some(key => hasEditorBinding(config[key]));
+    }
+
+    showUnboundHelp(element) {
+      this.closeUnboundHelp();
+      const t = this.t.bind(this);
+      const input = element.querySelector("input,select");
+      const title = input?.getAttribute("aria-label") || element.dataset.setting;
+      const menu = this.settingsScreen.querySelector("#settings-title")?.textContent ?? "";
+      const page = this.settingsScreen.querySelector("[data-settings-page-name]")?.textContent ?? "";
+      const pop = document.createElement("div");
+      pop.className = "unbound-pop";
+      pop.dataset.page = `${this.settingsMenuId}:${this.settingsPage}`;
+      pop.setAttribute("role", "dialog");
+      pop.innerHTML = `<b>${escapeHtml(t(`«${title}» is not linked`, `«${title}» — не прив’язано`))}</b>
+        ${escapeHtml(t("No entity is selected, so this item is inactive.", "Сутність не вибрано, тому пункт неактивний."))}<br>
+        ${escapeHtml(t("To link it:", "Прив’язати:"))} <i>${escapeHtml(t(`Edit card → Inverter menus → ${menu} → ${page}`, `Редагувати картку → Меню інвертора → ${menu} → ${page}`))}</i>${escapeHtml(t(", tap this field.", ", натисніть це поле."))}
+        <div class="unbound-actions"><button type="button" data-unbound-close>${escapeHtml(t("Got it", "Зрозуміло"))}</button></div>`;
+      this.settingsScreen.querySelector(".lcd-surface").append(pop);
+      pop.querySelector("button").focus({ preventScroll:true });
+    }
+
+    closeUnboundHelp() {
+      this.settingsScreen?.querySelector(".unbound-pop")?.remove();
     }
 
     fitNumber(input, unit) {
@@ -5330,13 +5453,14 @@
     }
 
     setGauge(key, wattsValue) {
-      const { value, fill } = this.gauges[key];
+      const { value, fill, gloss } = this.gauges[key];
       const magnitude = Math.abs(wattsValue ?? 0);
       const fraction = magnitude < flowThreshold ? 0 : Math.min(magnitude / (this.scale * 1000), 1);
       value.textContent = formatPower(wattsValue);
       value.toggleAttribute("data-unavailable", wattsValue === null);
       const path = fraction === 0 ? "" : arc(0, fraction);
       fill.setAttribute("d", path);
+      gloss?.setAttribute("d", path);
     }
 
     setFlow(name, power) {
@@ -5460,9 +5584,9 @@
       const primary = charge(states[this.config.battery_soc]);
       const second = charge(states[this.config.battery_soc_2]);
       const level = (node, value) => {
-        // Colour by charge: below 20 % red, below 40 % amber.
+        // Colour by charge: below 30 % red, below 50 % yellow, otherwise green.
         if (value === null) node.removeAttribute("data-level");
-        else node.dataset.level = value < 20 ? "low" : value < 40 ? "mid" : "ok";
+        else node.dataset.level = value < 30 ? "low" : value < 50 ? "mid" : "ok";
       };
       this.socLeft.textContent = percent(primary);
       this.socRight.textContent = percent(second);
@@ -5483,6 +5607,13 @@
       const lowest = separate && !weighted && banks.every(bank => bank.charge !== null) ? Math.min(...banks.map(bank => bank.charge)) : null;
       level(this.socLabel, shown ?? lowest);
       this.runtimeSoc = shown ?? lowest;
+      // ТЕХНіКА battery icon fills with the charge, like a glass jar.
+      const fillLevel = shown ?? lowest;
+      this.batteryFill ??= this.screen.querySelector('[data-gauge="battery_power"] .bat-fill');
+      if (this.batteryFill) {
+        this.batteryFill.setAttribute("width", fillLevel === null ? "0" : (34.8 * Math.min(100, Math.max(0, fillLevel)) / 100).toFixed(2));
+        this.batteryFill.setAttribute("fill", fillLevel === null ? "none" : `url(#deye-bat-${fillLevel < 30 ? "low" : fillLevel < 50 ? "mid" : "ok"})`);
+      }
     }
 
     update() {
