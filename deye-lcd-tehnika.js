@@ -9,7 +9,8 @@
   const legacyCardTag = "deye-lcd-8k";
   if (customElements.get(cardTag)) return;
 
-  const version = "Alpha 0.8.25";
+  const version = "Alpha 0.8.26";
+  const currentVersion = version.replace(/^[^\d]*/, "");
   const models = [3, 5, 6, 8, 10, 12, 15, 20, 30, 80, 160];
   const defaultModel = 8;
   const themes = [
@@ -26,6 +27,17 @@
   const storeLanguage = (value) => {
     try { localStorage.setItem(languageKey, value === "en" ? "en" : "uk"); } catch { /* kept for this page only */ }
     window.dispatchEvent(new CustomEvent(languageEvent, { detail:value }));
+  };
+  // Release check: the card asks GitHub at most every two hours and shares the answer between its copies on the page.
+  const releaseUrl = "https://api.github.com/repos/hrudkaav/deye-lcd-tehnika/releases/latest";
+  const releaseKey = "deye-lcd-tehnika:latest-release";
+  const updateDismissKey = "deye-lcd-tehnika:update-dismissed";
+  const releaseInterval = 2 * 60 * 60 * 1000;
+  const versionParts = (text) => String(text ?? "").replace(/^[^\d]*/, "").split(".").map(part => parseInt(part, 10) || 0);
+  const newerVersion = (candidate, current) => {
+    const a = versionParts(candidate), b = versionParts(current);
+    for (let i = 0; i < Math.max(a.length, b.length); i++) if ((a[i] ?? 0) !== (b[i] ?? 0)) return (a[i] ?? 0) > (b[i] ?? 0);
+    return false;
   };
   const threePhaseValues = ["3", 3];
   const acSources = ["grid", "load"];
@@ -1989,6 +2001,20 @@
     :host([data-palette="graphite"][data-appearance="dark"]) .t-glow { stroke:#aebbbf; opacity:.9; }
     :host([data-palette="graphite"][data-appearance="dark"]) #deye-t-fill stop:nth-child(1) { stop-color:#5a6467; }
     :host([data-palette="graphite"][data-appearance="dark"]) #deye-t-fill stop:nth-child(2) { stop-color:#272f33; }
+    /* A newer release: ТЕХНіКА gets a slowly breathing amber ring, КЛАСіК only a yellow inner ring with no motion. */
+    .t-update-ring { display:none; stroke:#f2a33a; transform-box:fill-box; transform-origin:center; }
+    :host([data-update]) .t-update-ring { display:inline; animation:t-update-pulse 2.4s ease-in-out infinite; }
+    :host([data-update]) .t-ring-inner { stroke:#e8a317; stroke-width:1.9; opacity:1; }
+    @keyframes t-update-pulse { 0%,100% { opacity:.25; transform:scale(.94); } 50% { opacity:1; transform:scale(1.04); } }
+    @media (prefers-reduced-motion:reduce) { :host([data-update]) .t-update-ring { animation:none; opacity:.85; } }
+    .ap-update { display:flex; gap:10px; align-items:flex-start; margin:0 0 11px; padding:9px 10px; border-radius:10px;
+      border:1px solid #f2a33a99; background:#f2a33a1a; }
+    .ap-update b { display:block; font-weight:650; }
+    .ap-update p { margin:2px 0 4px; font-size:12px; color:var(--ap-muted); line-height:1.35; }
+    .ap-update a { color:inherit; font-size:12px; }
+    .appearance-dialog .ap-update button { margin-left:auto; flex:none; min-height:0; padding:0 4px; border:0; background:transparent;
+      color:var(--ap-muted); font-size:18px; line-height:1; cursor:pointer; text-decoration:none; }
+    .ap-version { font-size:11px; color:var(--ap-muted); }
     .appearance-trigger[aria-expanded="true"] .hit { stroke:currentColor; stroke-width:.8; stroke-dasharray:2 2; opacity:.5; }
     ha-card { position:relative; }
     ha-card[data-pop-open] { overflow:visible; z-index:2; }
@@ -2715,6 +2741,9 @@
     .v-group-tag { position:absolute; transform:translate(-100%,-55%); z-index:2; padding:.15cqw .9cqw; border-radius:6px; color:#1d1406;
       font-size:2.1cqw; font-weight:700; white-space:nowrap; pointer-events:none; line-height:1.3; }
     .v-ctl.v-dim { opacity:.5; }
+    .v-ctl.v-hover { outline:2px solid #ffdf84; outline-offset:1px; filter:brightness(1.12); z-index:1; }
+    .v-groups .v-hover { stroke-width:2.4; stroke-dasharray:none; }
+    .v-group-tag.v-hover { box-shadow:0 0 0 2px #ffdf84; }
     .v-progress,.v-legend{margin:0;color:var(--secondary-text-color,#a7bac9);font-size:.9em}
     .v-legend{display:flex;flex-wrap:wrap;gap:6px 14px}
     .v-legend span{display:inline-flex;align-items:center;gap:6px}
@@ -2854,6 +2883,19 @@
       this.modal.addEventListener("close", () => { if (!this.modal.open) this.matchContext = null; });
       this.layout.addEventListener("click", event => this.navigate(event));
       this.layout.addEventListener("input", event => this.visualInput(event));
+      // Pointing at any item of a shared-entity group lights up the whole group, so it reads as one setting.
+      const hover = (event, on) => {
+        const item = event.target.closest?.(".v-body [data-vfield]");
+        const name = on && item ? item.dataset.vfield : "";
+        if (name === this.visualHover) return;
+        this.visualHover = name;
+        for (const node of this.layout.querySelectorAll(".v-hover")) node.classList.remove("v-hover");
+        if (!name || this.layout.querySelectorAll(`.v-body [data-vfield="${CSS.escape(name)}"]`).length < 2) return;
+        for (const node of this.layout.querySelectorAll(`.v-body [data-vfield="${CSS.escape(name)}"], .v-body [data-group="${CSS.escape(name)}"]`)) node.classList.add("v-hover");
+      };
+      this.layout.addEventListener("pointerover", event => hover(event, true));
+      this.layout.addEventListener("pointerleave", event => hover(event, false));
+      this.layout.addEventListener("focusin", event => hover(event, true));
       window.addEventListener(languageEvent, () => { if (this.config && this.config.language !== storedLanguage()) { this.schemaKey = ""; this.layoutKey = ""; this.setConfig(this.config); } });
       this.form = document.createElement("ha-form");
       this.form.addEventListener("value-changed", event => this.formChanged(event));
@@ -3245,15 +3287,15 @@
           // Separate frames of one group are tied together by a dashed line along their left side.
           const x = Math.max(1.5, Math.min(...frames.map(f => f.x0)) - 2.2);
           const ys = frames.map(f => (f.y0 + f.y1) / 2);
-          svg += `<path d="M${x} ${Math.min(...ys)}V${Math.max(...ys)}" stroke="${colour}" stroke-width="1.6" stroke-dasharray="3 2" fill="none" vector-effect="non-scaling-stroke"/>`;
+          svg += `<path data-group="${escapeHtml(name)}" d="M${x} ${Math.min(...ys)}V${Math.max(...ys)}" stroke="${colour}" stroke-width="1.6" stroke-dasharray="3 2" fill="none" vector-effect="non-scaling-stroke"/>`;
           for (const f of frames) svg += `<path d="M${x} ${((f.y0 + f.y1) / 2).toFixed(1)}H${f.x0.toFixed(1)}" stroke="${colour}" stroke-width="1.6" fill="none" vector-effect="non-scaling-stroke"/>`;
         }
         for (const f of frames) {
-          svg += `<rect x="${f.x0.toFixed(1)}" y="${f.y0.toFixed(1)}" width="${(f.x1 - f.x0).toFixed(1)}" height="${(f.y1 - f.y0).toFixed(1)}" rx="5"
+          svg += `<rect data-group="${escapeHtml(name)}" x="${f.x0.toFixed(1)}" y="${f.y0.toFixed(1)}" width="${(f.x1 - f.x0).toFixed(1)}" height="${(f.y1 - f.y0).toFixed(1)}" rx="5"
             fill="${colour}14" stroke="${colour}" stroke-width="1.3" stroke-dasharray="4 2.6" vector-effect="non-scaling-stroke"/>`;
         }
         const first = frames[0];
-        tags += `<span class="v-group-tag" style="left:${pct(first.x1 - 2, visualScreen.w)};top:${pct(first.y0, visualScreen.h)};background:${colour}">${escapeHtml(t("1 entity", "1 сутність"))}</span>`;
+        tags += `<span class="v-group-tag" data-group="${escapeHtml(name)}" style="left:${pct(first.x1 - 2, visualScreen.w)};top:${pct(first.y0, visualScreen.h)};background:${colour}">${escapeHtml(t("1 entity", "1 сутність"))}</span>`;
       });
       return `<svg class="v-groups" viewBox="0 0 ${visualScreen.w} ${visualScreen.h}" preserveAspectRatio="none" aria-hidden="true">${svg}</svg>${tags}`;
     }
@@ -3667,10 +3709,11 @@
             <rect class="hit" x="-22" y="-22" width="44" height="44" rx="6" fill="transparent"/>
             <g class="classic-only" aria-hidden="true">
               <circle class="t-ring-line" r="14.5" fill="none" stroke-width="2.4"/>
-              <circle class="t-ring-line" r="11" fill="none" stroke-width=".8" opacity=".5"/>
+              <circle class="t-ring-line t-ring-inner" r="11" fill="none" stroke-width=".8" opacity=".5"/>
               <path class="t-ring-letter" d="M-5.3-5H5.3M0-5V6.6" fill="none" stroke-width="2.8" stroke-linecap="square"/>
             </g>
             <g class="technika-only" aria-hidden="true">
+              <circle class="t-update-ring" r="18" fill="none" stroke-width="2"/>
               <circle class="t-glow" r="15" fill="none" stroke-width="2.4" filter="url(#deye-t-glow)"/>
               <circle class="t-fill" r="14.5" fill="url(#deye-t-fill)" stroke-width="1.3"/>
               <circle class="t-inner" r="11" fill="none" stroke-width=".7" opacity=".4"/>
@@ -3721,7 +3764,13 @@
       });
       this.appearanceDialog.addEventListener("click", event => {
         const button = event.target.closest("button");
-        if (button?.dataset.language) { storeLanguage(button.dataset.language); this.renderAppearance(); this.appearanceDialog.querySelector(`[data-language="${button.dataset.language}"]`)?.focus({ preventScroll:true }); }
+        if (button?.dataset.updateDismiss !== undefined) {
+          try { localStorage.setItem(updateDismissKey, this.latestRelease?.version ?? ""); } catch { /* shown again next time */ }
+          this.refreshUpdateMark();
+          this.renderAppearance();
+          this.appearanceDialog.querySelector('[aria-pressed="true"]')?.focus({ preventScroll:true });
+        }
+        else if (button?.dataset.language) { storeLanguage(button.dataset.language); this.renderAppearance(); this.appearanceDialog.querySelector(`[data-language="${button.dataset.language}"]`)?.focus({ preventScroll:true }); }
         else if (button?.dataset.visualKey === "lcd_appearance" && button.dataset.visualValue === "auto") this.cycleAutoAppearance();
         else if (button?.dataset.visualKey) this.setVisualPreference(button.dataset.visualKey, button.dataset.visualValue);
         else if (button?.dataset.visualReset !== undefined) this.resetVisualPreferences();
@@ -4000,6 +4049,9 @@
       this.onLanguage ??= () => { if (this.sourceConfig) this.setConfig(this.sourceConfig); };
       window.addEventListener(languageEvent, this.onLanguage);
       this.syncFlowEngine();
+      this.checkForUpdate();
+      clearInterval(this.releaseTimer);
+      this.releaseTimer = setInterval(() => this.checkForUpdate(), releaseInterval);
     }
 
     disconnectedCallback() {
@@ -4008,6 +4060,7 @@
       if (this.flowFrame) cancelAnimationFrame(this.flowFrame);
       this.flowFrame = 0;
       if (this.onLanguage) window.removeEventListener(languageEvent, this.onLanguage);
+      clearInterval(this.releaseTimer);
       this.closeDetails();
       this.closeSettings();
       this.closeAppearance(false);
@@ -4088,6 +4141,37 @@
       this.saveVisualPreferences();
     }
 
+    checkForUpdate() {
+      let cached = null;
+      try { cached = JSON.parse(localStorage.getItem(releaseKey) || "null"); } catch { cached = null; }
+      if (cached && Date.now() - cached.at < releaseInterval) {
+        this.latestRelease = cached.version ? cached : null;
+        this.refreshUpdateMark();
+        return;
+      }
+      if (this.releaseRequest || typeof fetch !== "function") return;
+      // Quietly skipped when GitHub cannot be reached; the next attempt comes with the next interval.
+      this.releaseRequest = fetch(releaseUrl, { headers:{ Accept:"application/vnd.github+json" } })
+        .then(response => response.ok ? response.json() : null)
+        .then(json => {
+          const info = { at:Date.now(), version:json?.tag_name ? String(json.tag_name).replace(/^v/i, "") : null, url:json?.html_url ?? "" };
+          try { localStorage.setItem(releaseKey, JSON.stringify(info)); } catch { /* checked again next time */ }
+          this.latestRelease = info.version ? info : null;
+          this.refreshUpdateMark();
+        })
+        .catch(() => {})
+        .finally(() => { this.releaseRequest = null; });
+    }
+
+    updateAvailable() {
+      if (!this.latestRelease?.version || !newerVersion(this.latestRelease.version, currentVersion)) return false;
+      try { return localStorage.getItem(updateDismissKey) !== this.latestRelease.version; } catch { return true; }
+    }
+
+    refreshUpdateMark() {
+      this.toggleAttribute("data-update", this.updateAvailable());
+    }
+
     cycleAutoAppearance() {
       // First tap turns «Авто» on; each next tap moves to the next source: HA theme → sun → device.
       const sources = visualValues.lcd_auto_source;
@@ -4162,7 +4246,12 @@
       const ukraine = '<svg viewBox="0 0 3 2" aria-hidden="true"><rect width="3" height="1" fill="#0057b7"/><rect y="1" width="3" height="1" fill="#ffd700"/></svg>';
       const britain = '<svg viewBox="0 0 60 30" aria-hidden="true"><path d="M0 0h60v30H0z" fill="#012169"/><path d="M0 0l60 30M60 0L0 30" stroke="#fff" stroke-width="6"/><path d="M0 0l60 30M60 0L0 30" stroke="#c8102e" stroke-width="2.4"/><path d="M30 0v30M0 15h60" stroke="#fff" stroke-width="10"/><path d="M30 0v30M0 15h60" stroke="#c8102e" stroke-width="6"/></svg>';
       // Common options first; options that only the ТЕХНіКА theme has always go below them.
+      const latest = this.updateAvailable() ? this.latestRelease : null;
       this.appearanceDialog.innerHTML = `<h2 id="appearance-title" class="sr-only">${t("Card appearance", "Оформлення картки")}</h2>
+        ${latest ? `<div class="ap-update" role="status"><div><b>${t(`Version ${escapeHtml(latest.version)} is out`, `Вийшла версія ${escapeHtml(latest.version)}`)}</b>
+          <p>${t(`You have ${currentVersion}. Update in HACS → Deye · LCD ТЕХНіКА.`, `У вас ${currentVersion}. Оновіть у HACS → Deye · LCD ТЕХНіКА.`)}</p>
+          ${latest.url ? `<a href="${escapeHtml(latest.url)}" target="_blank" rel="noopener noreferrer">${t("What’s new ↗", "Що нового ↗")}</a>` : ""}</div>
+          <button type="button" data-update-dismiss aria-label="${t("Hide until the next version", "Сховати до наступної версії")}" title="${t("Hide until the next version", "Сховати до наступної версії")}">×</button></div>` : ""}
         <div class="ap-grid">
           ${row("theme", t("Theme", "Тема"), button("lcd_theme", "classic", "КЛАСіК") + button("lcd_theme", "technika", "ТЕХНіКА"))}
           <span class="ap-label" id="ap-mode">${t("Look", "Вигляд")}</span>
@@ -4182,6 +4271,7 @@
         </div>
         <div class="ap-footer">
           <div class="ap-flags" role="group" aria-label="${t("Language", "Мова")}">${flag("uk", "Українська", ukraine)}${flag("en", "English", britain)}</div>
+          <span class="ap-version">v${currentVersion}</span>
           <button type="button" data-visual-reset>${t("Reset", "Скинути")}</button>
         </div>`;
     }
