@@ -9,7 +9,7 @@
   const legacyCardTag = "deye-lcd-8k";
   if (customElements.get(cardTag)) return;
 
-  const version = "Alpha 0.8.28";
+  const version = "Alpha 0.8.29";
   const currentVersion = version.replace(/^[^\d]*/, "");
   const models = [3, 5, 6, 8, 10, 12, 15, 20, 30, 80, 160];
   const defaultModel = 8;
@@ -899,25 +899,11 @@
         </button>
         <h2 id="details-title" tabindex="-1"></h2>
       </header>
-      <div class="details-runtime" data-runtime hidden>
-        <span class="details-runtime-label" data-runtime-label></span>
-        <strong class="details-runtime-value" data-runtime-value>—</strong>
-        <small class="details-runtime-note" data-runtime-note></small>
-      </div>
-      <dl class="details-readings">
-        ${measurementFields.map(({ key, label }) => `<div class="details-metric" data-metric="${key}">
-          <dt>${translated(pair(metricEnglish[key], label))}</dt>
-          <dd>${measurementMarkup}</dd>
-        </div>`).join("")}
-      </dl>
-      ${detailBreakdowns.map(breakdownMarkup).join("")}
-      ${inverterColumns.map(({ prefix }, index) => breakdownMarkup({
-        key: prefix, title: `Інвертор ${index + 1} · фази`, columns: phaseColumns, fields: acMeasurements,
-      })).join("")}
+      <div class="details-body" data-details-body></div>
       <section class="details-history" aria-labelledby="details-history-title">
         <div class="details-history-head">
           <h3 id="details-history-title">Потужність за 24 год</h3>
-          <button type="button" class="details-back details-history-toggle" data-history-toggle hidden>${translated(pair("Individual", "Окремо"))}</button>
+          <button type="button" class="details-back details-history-toggle" data-history-toggle aria-pressed="false" hidden>${translated(pair("Individual", "Окремо"))}</button>
         </div>
         <p class="history-message" role="status"></p>
         <div class="history-chart" hidden></div>
@@ -1334,6 +1320,437 @@
     return value;
   }
 
+  /* ── 0.8.29 · gauge windows: one layout for the card (work) and for the editor (settings) ── */
+  const gridUnits = {
+    kw:pair("kW", "кВт"), v:pair("V", "В"), a:pair("A", "А"), kwh:pair("kWh", "кВт·год"), mwh:pair("MWh", "МВт·год"),
+    pct:pair("%", "%"), c:pair("°C", "°C"), none:pair("", ""),
+  };
+  const gridAggText = { sum:pair("sum", "сума"), avg:pair("average", "середнє"), avgOn:pair("average", "середнє"), max:pair("highest", "найвища") };
+  const gridTile = (k, en, uk, unit, agg, field, extra = {}) => ({ k, label:pair(en, uk), unit, agg, field, dom:"sensor", ...extra });
+  const gridLayouts = {
+    pv: { sub:"inputs", tiles:[
+      gridTile("power", "Power", "Потужність", "kw", "sum", "pv_power", { main:true }),
+      gridTile("today", "Today", "Сьогодні", "kwh", "sum", "pv_energy_today"),
+      gridTile("total", "Total", "Всього", "kwh", "sum", "pv_energy_total"),
+    ] },
+    grid: { sub:"phases", tiles:[
+      gridTile("power", "Power", "Потужність", "kw", "sum", "grid_power", { main:true }),
+      gridTile("voltage", "Voltage", "Напруга", "v", "avgOn", "grid_voltage", { fromSub:true }),
+      gridTile("current", "Current", "Струм", "a", "sum", "grid_current", { fromSub:true }),
+      gridTile("status", "Grid", "Мережа", "none", "status", "grid_connected", { dom:"binary_sensor" }),
+    ] },
+    battery: { runtime:true, chartPage:true, tiles:[
+      gridTile("power", "Power", "Потужність", "kw", "sum", "battery_power", { main:true }),
+      gridTile("soc", "Charge", "Заряд", "pct", "avg", "battery_soc", { main:true }),
+      gridTile("voltage", "Voltage", "Напруга", "v", "avg", "battery_voltage"),
+      gridTile("current", "Current", "Струм", "a", "sum", "battery_current"),
+      gridTile("temperature", "Temperature", "Температура", "c", "max", "battery_temperature"),
+    ] },
+    load: { sub:"phases", tiles:[
+      gridTile("power", "Power", "Потужність", "kw", "sum", "load_power", { main:true }),
+      gridTile("voltage", "Voltage", "Напруга", "v", "avg", "load_voltage", { fromSub:true }),
+      gridTile("current", "Current", "Струм", "a", "sum", "load_current", { fromSub:true }),
+      gridTile("today", "Today", "Сьогодні", "kwh", "sum", "load_energy_today"),
+    ] },
+    generator: { sub:"phases", tiles:[
+      gridTile("power", "Power", "Потужність", "kw", "sum", "generator_power", { main:true }),
+      gridTile("voltage", "Voltage", "Напруга", "v", "avg", "generator_voltage", { fromSub:true }),
+      gridTile("current", "Current", "Струм", "a", "sum", "generator_current", { fromSub:true }),
+      gridTile("today", "Today", "Сьогодні", "kwh", "sum", "generator_energy_today"),
+    ] },
+  };
+  const gridSubMetrics = [
+    { k:"voltage", label:pair("Voltage", "Напруга"), unit:"v" },
+    { k:"current", label:pair("Current", "Струм"), unit:"a" },
+    { k:"power", label:pair("Power", "Потужність"), unit:"kw" },
+  ];
+  const gridShortNames = { pv:pair("Solar", "Сонце"), grid:pair("Grid", "Мережа"), battery:pair("Battery", "Батарея"), load:pair("Load", "Навантаження"), generator:pair("Generator", "Генератор") };
+  const gaugeOfSource = (source) => source === "generator" ? generatorGauge : gaugeLayout.find(gauge => gauge.source === source);
+  const gridInverters = (config, source) => powerSources(config, gaugeOfSource(source)).map(({ index }) => index);
+  const gridHasSub = (config, source) => source === "pv" || (gridLayouts[source]?.sub === "phases" && threePhaseValues.includes(config.inverter_phases));
+  const gridSubField = (source, column, metric) => `${source}_${column}_${metric}`;
+  const gridBound = (config, name) => hasEditorBinding(config?.[name]);
+  function pvInputCount(config, index) {
+    const stored = Number(config?.[inverterField(index, "pv_inputs")]);
+    let highest = 0;
+    for (const n of pvInputs) if (gridSubMetrics.some(({ k }) => gridBound(config, inverterField(index, `pv_${n}_${k}`)))) highest = n;
+    return Math.min(6, Math.max(1, highest, Number.isFinite(stored) ? Math.round(stored) : 0));
+  }
+  const gridColumns = (config, source, index) => source === "pv"
+    ? Array.from({ length:pvInputCount(config, index) }, (_, i) => String(i + 1)) : ["l1", "l2", "l3"];
+  const gridColumnTitle = (source, column) => source === "pv" ? `PV${column}` : column.toUpperCase();
+
+  function energyKwh(entity) {
+    const value = reading(entity);
+    if (value === null) return null;
+    const unit = String(entity?.attributes?.unit_of_measurement ?? "kWh").trim().toLowerCase();
+    const factor = { kwh:1, "квт·год":1, "квт*год":1, wh:.001, "вт·год":.001, mwh:1000, "мвт·год":1000 }[unit];
+    return factor === undefined ? value : value * factor;
+  }
+  function gridValue(metric, unit, id, states) {
+    if (!id) return null;
+    if (unit === "a") return currentTotal([id], states);
+    if (unit === "kw") return watts(states[id]);
+    if (unit === "kwh") return energyKwh(states[id]);
+    if (metric === "soc") return charge(states[id]);
+    if (unit === "v") {
+      const entity = states[id];
+      const factor = { v:1, "в":1, mv:.001, "мв":.001, kv:1000, "кв":1000 }[String(entity?.attributes?.unit_of_measurement ?? "v").trim().toLowerCase()];
+      const value = reading(entity);
+      return value === null ? null : value * (factor ?? 1);
+    }
+    return reading(states[id]);
+  }
+  const batteryFactor = (config, source) => source === "battery" && config.battery_power_x2 === true ? 2 : 1;
+
+  // One inverter's reading for a tile: { v, bound, derived } or null when nothing is linked.
+  function gridReading(config, states, source, tile, index) {
+    if (tile.k === "power") {
+      const item = powerSources(config, gaugeOfSource(source)).find(entry => entry.index === index);
+      if (!item || !powerParts([item]).some(part => part.id)) return null;
+      const total = powerTotal([item], states, source === "pv" && !item.id);
+      return { v:total === null ? null : total * batteryFactor(config, source), bound:Boolean(item.id), derived:!item.id && source === "pv" ? "pv" : "" };
+    }
+    const id = config[inverterField(index, tile.field)];
+    if (tile.k === "status") {
+      if (!id) return null;
+      const state = String(states[id]?.state ?? "").toLowerCase();
+      return { v:state === "on" ? "on" : state === "off" ? "off" : null, bound:true, derived:"" };
+    }
+    if (!hasEditorBinding(id) && tile.k === "current" && source === "battery" && config.battery_power_mode === "channels") {
+      const channels = [1, 2].map(channel => config[inverterField(index, `battery_${channel}_current`)]).filter(hasEditorBinding);
+      if (channels.length === 2) return { v:currentTotal(channels, states), bound:false, derived:"channels" };
+    }
+    if (hasEditorBinding(id)) {
+      return { v:gridValue(tile.k, tile.unit, id, states), bound:true, derived:"" };
+    }
+    if (tile.fromSub && gridHasSub(config, source)) {
+      const ids = gridColumns(config, source, index).map(column => config[inverterField(index, gridSubField(source, column, tile.k))]).filter(hasEditorBinding);
+      if (!ids.length) return null;
+      const values = ids.map(phase => gridValue(tile.k, tile.unit, phase, states)).filter(Number.isFinite);
+      return { v:values.length ? values.reduce((a, b) => a + b, 0) / values.length : null, bound:false, derived:"phases" };
+    }
+    return null;
+  }
+
+  function combinedSoc(config, states) {
+    const count = inverterCount(config);
+    if (!(batterySeparate(config) && count > 1)) return charge(states[config.battery_soc]);
+    const banks = installedInverters(config).map(index => ({
+      charge:charge(states[config[inverterField(index, "battery_soc")]]),
+      capacity:Number(config[inverterField(index, "battery_soc_capacity_kwh")]),
+    }));
+    if (banks.every(bank => Number.isFinite(bank.capacity) && bank.capacity > 0 && bank.charge !== null)) {
+      return banks.reduce((sum, bank) => sum + bank.capacity * bank.charge, 0) / banks.reduce((sum, bank) => sum + bank.capacity, 0);
+    }
+    const known = banks.map(bank => bank.charge).filter(value => value !== null);
+    return known.length ? known.reduce((a, b) => a + b, 0) / known.length : null;
+  }
+
+  // Combined value of a tile across the inverters of this window.
+  function gridTotal(config, states, source, tile, indices) {
+    if (tile.k === "power") {
+      const sources = powerSources(config, gaugeOfSource(source));
+      if (!powerParts(sources).some(part => part.id)) return null;
+      const total = powerTotal(sources, states, source === "pv");
+      return total === null ? null : total * batteryFactor(config, source);
+    }
+    const rows = indices.map(index => ({ index, row:gridReading(config, states, source, tile, index) })).filter(({ row }) => row);
+    if (tile.k === "soc" && indices.length > 1) {
+      const soc = combinedSoc(config, states);
+      if (soc !== null) return soc;
+    }
+    const values = rows.map(({ row }) => row.v).filter(Number.isFinite);
+    if (!values.length) return null;
+    if (tile.agg === "sum") return values.reduce((a, b) => a + b, 0);
+    if (tile.agg === "max") return Math.max(...values);
+    if (tile.agg === "avgOn") {
+      // An inverter without the grid must not pull the average voltage down.
+      const live = rows.filter(({ index, row }) => Number.isFinite(row.v) && row.v > gridOffVoltage
+        && String(states[config[inverterField(index, "grid_connected")]]?.state ?? "").toLowerCase() !== "off").map(({ row }) => row.v);
+      return live.length ? live.reduce((a, b) => a + b, 0) / live.length : 0;
+    }
+    const positive = tile.unit === "v" ? values.filter(value => value > 0) : values;
+    const pool = positive.length ? positive : values;
+    return pool.reduce((a, b) => a + b, 0) / pool.length;
+  }
+
+  function gridStatus(config, states, indices) {
+    const tile = gridLayouts.grid.tiles[3];
+    const values = indices.map(index => gridReading(config, states, "grid", tile, index));
+    if (values.every(value => !value)) return null;
+    return { values:values.map(value => value?.v ?? null), on:values.filter(value => value?.v === "on").length, known:values.filter(value => value?.v).length };
+  }
+
+  function gridFormat(tile, value, english) {
+    if (value === null || value === undefined || !Number.isFinite(value)) return { text:"—", unit:"" };
+    const format = english ? englishMeasurementFormat : measurementFormat;
+    const unit = (key) => english ? gridUnits[key].en : gridUnits[key].uk;
+    if (tile.unit === "kw") return { text:format.format(Math.round(value / 10) / 100), unit:unit("kw") };
+    if (tile.unit === "kwh") return Math.abs(value) >= 1000
+      ? { text:format.format(Math.round(value / 100) / 10), unit:unit("mwh") } : { text:format.format(Math.round(value * 10) / 10), unit:unit("kwh") };
+    if (tile.unit === "pct") return { text:String(Math.round(value)), unit:"%" };
+    return { text:format.format(Math.round(value * 10) / 10), unit:unit(tile.unit) };
+  }
+
+  /* battery runtime, shared by the card window and the editor preview */
+  function batteryCapacityOf(config, states) {
+    // Order: the value typed in the editor, separate banks, a kWh sensor, then Ah × battery voltage.
+    const manual = Number(config.battery_runtime_capacity_kwh);
+    if (config.battery_runtime_capacity_kwh !== "" && Number.isFinite(manual) && manual > 0) return { kwh:manual, source:"manual" };
+    if (batterySeparate(config) && inverterCount(config) > 1) {
+      const banks = installedInverters(config).map(index => Number(config[inverterField(index, "battery_soc_capacity_kwh")]));
+      if (banks.every(value => Number.isFinite(value) && value > 0)) return { kwh:banks.reduce((a, b) => a + b, 0), source:"banks" };
+    }
+    const sensor = states[config.battery_capacity_sensor];
+    const amount = reading(sensor);
+    if (amount !== null && amount > 0) {
+      const unit = String(sensor.attributes?.unit_of_measurement ?? "kWh").trim().toLowerCase();
+      const factor = { kwh:1, "квт·год":1, wh:0.001, "вт·год":0.001, mwh:1000 }[unit];
+      if (factor) return { kwh:amount * factor, source:"sensor" };
+    }
+    const ah = reading(states[config.battery_capacity]);
+    const volts = reading(states[config.battery_voltage]);
+    if (ah !== null && ah > 0 && volts !== null && volts > 0) return { kwh:ah * volts / 1000, source:"ah" };
+    return null;
+  }
+  function runtimeCutoffOf(config, states) {
+    const custom = config.battery_runtime_cutoff;
+    if (custom !== undefined && custom !== null && custom !== "" && Number.isFinite(Number(custom))) return Math.min(95, Math.max(0, Number(custom)));
+    const shutdown = states[config.battery_shutdown];
+    const unit = String(shutdown?.attributes?.unit_of_measurement ?? "").trim();
+    const value = reading(shutdown);
+    return unit === "%" && value !== null && value >= 0 && value < 100 ? value : 20;
+  }
+  function durationText(minutes, t) {
+    if (minutes >= 48 * 60) return t("over 2 days", "понад 2 доби");
+    const hours = Math.floor(minutes / 60), rest = Math.round(minutes % 60);
+    const h = hours + (rest === 60 ? 1 : 0), m = rest === 60 ? 0 : rest;
+    if (!h) return t(`${m} min`, `${m} хв`);
+    return m ? t(`${h} h ${m} min`, `${h} год ${m} хв`) : t(`${h} h`, `${h} год`);
+  }
+  function runtimeInfo(config, states, soc, t) {
+    const raw = powerTotal(powerSources(config, gaugeByKey.battery_power), states);
+    const power = raw === null ? null : raw * (config.battery_power_x2 === true ? 2 : 1);
+    const capacity = batteryCapacityOf(config, states);
+    const cutoff = runtimeCutoffOf(config, states);
+    const number = value => (preferEnglish(config) ? englishMeasurementFormat : measurementFormat).format(Math.round(value * 10) / 10);
+    const charging = power !== null && power < 0;
+    const label = charging ? t("Time to full charge", "До повного заряду") : t("Battery runtime", "Час роботи від АКБ");
+    let value = "—", note;
+    if (!capacity) note = t("Set the battery capacity in the card editor (Main screen → Battery).", "Вкажіть ємність АКБ у редакторі картки («Головний екран» → Батарея).");
+    else if (power === null || soc === null) note = t("Battery power or charge is unavailable.", "Немає даних про потужність або заряд АКБ.");
+    else if (Math.abs(power) < 50) note = t("The battery is idle.", "АКБ у спокої.");
+    else if (charging) {
+      value = soc >= 100 ? t("Full", "Заряджено") : durationText(capacity.kwh * (100 - soc) / 100 / (-power / 1000) * 60, t);
+      note = t(`to 100 % · ${number(capacity.kwh)} kWh · at the current power`, `до 100 % · ${number(capacity.kwh)} кВт·год · за поточною потужністю`);
+    } else {
+      value = soc <= cutoff ? t("Threshold reached", "Поріг досягнуто") : durationText(capacity.kwh * (soc - cutoff) / 100 / (power / 1000) * 60, t);
+      note = t(`down to ${number(cutoff)} % · ${number(capacity.kwh)} kWh · at the current power`, `до ${number(cutoff)} % · ${number(capacity.kwh)} кВт·год · за поточною потужністю`);
+    }
+    return { label, value, note, charging:charging && value !== "—", capacity, cutoff };
+  }
+
+  const gridIcons = {
+    ok:'<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10.5" fill="#2fbf6a"/><path d="M7 12.5l3.2 3.2L17.3 8.6" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    off:'<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10.5" fill="#e5392b"/><path d="M8 8l8 8M16 8l-8 8" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/></svg>',
+    part:'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.2 23 21.3H1z" fill="#ffc20e" stroke="#ffc20e" stroke-width="1.5" stroke-linejoin="round"/><path d="M12 9v5.6" stroke="#2a1e05" stroke-width="2.6" stroke-linecap="round"/><circle cx="12" cy="18" r="1.5" fill="#2a1e05"/></svg>',
+    none:'<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="3 3" opacity=".6"/></svg>',
+  };
+
+  // Field-by-field progress of a window, used by the editor counters and rings.
+  function gridProgress(config, states, source) {
+    const layout = gridLayouts[source];
+    const indices = gridInverters(config, source);
+    let done = 0, total = 0, power = false;
+    for (const tile of layout.tiles) for (const index of indices) {
+      total++;
+      const row = gridReading(config, {}, source, tile, index);
+      if (row) { done++; if (tile.k === "power") power = true; }
+    }
+    if (layout.runtime) { total++; if (batteryCapacityOf(config, states)) done++; }
+    return { done, total, state:!power ? "empty" : done === total ? "ok" : "part" };
+  }
+
+  // Order in which «Next empty» walks through a window.
+  function gridOrder(config, source, page) {
+    const indices = gridInverters(config, source);
+    if (page === "sub") return indices.flatMap(index => gridSubMetrics.flatMap(({ k }) =>
+      gridColumns(config, source, index).map(column => inverterField(index, gridSubField(source, column, k)))));
+    const layout = gridLayouts[source];
+    const order = layout.tiles.flatMap(tile => indices.map(index => inverterField(index, tile.field)));
+    if (layout.runtime) order.splice(2 * indices.length, 0, "__runtime");
+    return order;
+  }
+  function gridSlotNeeded(config, states, source, slot, page) {
+    if (slot === "__runtime") return !batteryCapacityOf(config, states);
+    if (gridBound(config, slot)) return false;
+    if (page === "sub") return true;
+    const index = Number(/^inverter_(\d)_/.exec(slot)?.[1] ?? 1) - 1;
+    const tile = gridLayouts[source].tiles.find(item => inverterField(index, item.field) === slot);
+    return !(tile && gridReading(config, {}, source, tile, index));
+  }
+
+  /*
+   * Body of a gauge window. o = { config, states, source, page:"main"|"sub", edit, sel, t, english, sheet(slot) }.
+   * Work and settings mode share the same layout; settings mode swaps the numbers for entity slots.
+   */
+  function gridBodyHtml(o) {
+    const { config, states, source, edit, sel, t, english } = o;
+    const layout = gridLayouts[source];
+    const indices = gridInverters(config, source);
+    const parallel = indices.length > 1;
+    const L = (text) => escapeHtml(english ? text.en : text.uk);
+    const slotHtml = (name, tile, prefix = "") => {
+      const id = config[name];
+      const entity = states[id];
+      let inner = "+";
+      if (hasEditorBinding(id)) {
+        if (tile.k === "status") inner = entity?.state === "on" ? `✓ ${escapeHtml(t("on", "є"))}` : entity?.state === "off" ? `✕ ${escapeHtml(t("off", "немає"))}` : "—";
+        else { const shown = gridFormat(tile, gridValue(tile.k, tile.unit, id, states), english); inner = escapeHtml(shown.text); }
+      }
+      return `<button type="button" class="slot${hasEditorBinding(id) ? "" : " empty"}${sel === name ? " sel" : ""}" data-gslot="${escapeHtml(name)}"
+        title="${escapeHtml(hasEditorBinding(id) ? id : t("Tap to choose an entity", "Натисніть, щоб вибрати сутність"))}">${prefix ? `<i>${escapeHtml(prefix)}</i>` : ""}${inner}</button>`;
+    };
+    const sizeClass = (n) => layout.runtime ? (n <= 2 ? " half" : " third") : "";
+    const tileHtml = (tile, n) => {
+      const keyMark = tile.main ? `<span class="key">${escapeHtml(t("MAIN", "ГОЛОВНА"))}</span>` : "";
+      if (edit) {
+        const rows = indices.map(index => ({ index, row:gridReading(config, states, source, tile, index) }));
+        const done = rows.every(({ row }) => row);
+        const slots = rows.map(({ index, row }) => {
+          const prefix = parallel ? `#${index + 1}` : "";
+          if (row && !row.bound && row.derived) {
+            const shown = gridFormat(tile, row.v, english);
+            return `<span class="slot derived">${prefix ? `<i>${prefix}</i>` : ""}${escapeHtml(shown.text)}<i>${escapeHtml(row.derived === "pv" ? t("PV sum", "сума PV") : row.derived === "channels" ? t("channel sum", "сума каналів") : t("from phases", "з фаз"))}</i></span>`;
+          }
+          return slotHtml(inverterField(index, tile.field), tile, prefix);
+        }).join("");
+        return `<div class="g-tile e${sizeClass(n)}" style="order:${n * 2}"><span class="g-num${done ? " ok" : ""}">${n}</span>${keyMark}<dt>${L(tile.label)}</dt><div class="slots">${slots}</div></div>`;
+      }
+      if (tile.k === "status") {
+        const status = gridStatus(config, states, indices);
+        let icon = "none", text = "—";
+        if (status) {
+          if (status.on === indices.length) { icon = "ok"; text = t("Yes", "Є"); }
+          else if (status.on === 0 && status.known) { icon = "off"; text = t("No", "Немає"); }
+          else if (status.on) { icon = "part"; text = t(`${status.on} of ${indices.length}`, `${status.on} з ${indices.length}`); }
+        }
+        const split = parallel && status ? `<div class="g-split">${status.values.map((value, k) => `<span><i>#${indices[k] + 1}</i><b class="${value === "on" ? "dotok" : value === "off" ? "dotbad" : ""}">${value === "on" ? "●" : value === "off" ? "○" : "—"}</b></span>`).join("")}</div>` : "";
+        return `<div class="g-tile" style="order:${n * 2}"><dt>${L(tile.label)}</dt><span class="g-stat">${gridIcons[icon]}</span><span class="g-stat-t">${escapeHtml(text)}</span>${split}</div>`;
+      }
+      const total = gridFormat(tile, gridTotal(config, states, source, tile, indices), english);
+      const split = parallel ? `<div class="g-split">${indices.map(index => {
+        const row = gridReading(config, states, source, tile, index);
+        return `<span><i>#${index + 1}</i><b>${escapeHtml(gridFormat(tile, row?.v ?? null, english).text)}</b></span>`;
+      }).join("")}</div>` : "";
+      return `<div class="g-tile${sizeClass(n)}" style="order:${n * 2}"><dt>${L(tile.label)}</dt><dd>${escapeHtml(total.text)}<small>${escapeHtml(total.unit)}</small></dd>${parallel ? `<span class="g-agg">${L(gridAggText[tile.agg] ?? gridAggText.avg)}</span>` : ""}${split}</div>`;
+    };
+    if (o.page === "sub") {
+      return indices.map(index => {
+        const columns = gridColumns(config, source, index);
+        const pv = source === "pv";
+        const wide = columns.length > 4;
+        const add = edit && pv && columns.length < 6 ? `<th class="pvadd"><button type="button" class="g-btn" data-gact="pvadd" data-gi="${index}" aria-label="${escapeHtml(t(`Add PV${columns.length + 1}`, `Додати PV${columns.length + 1}`))}">+<small>PV${columns.length + 1}</small></button></th>` : "";
+        const head = (column) => `<th scope="col">${gridColumnTitle(source, column)}${edit && pv && columns.length > 1 && column === columns.at(-1)
+          ? ` <button type="button" class="pvdel" data-gact="pvdel" data-gi="${index}" aria-label="${escapeHtml(t(`Remove PV${column}`, `Прибрати PV${column}`))}">×</button>` : ""}</th>`;
+        const caption = parallel ? t(`Inverter #${index + 1} · ${pv ? "by input" : "by phase"}`, `Інвертор #${index + 1} · ${pv ? "по входах" : "по фазах"}`)
+          : t(pv ? "By input" : "By phase", pv ? "Окремо по входах" : "Окремо по фазах");
+        const rows = gridSubMetrics.map(metric => `<tr><th scope="row">${L(metric.label)}${wide ? `, ${L(gridUnits[metric.unit])}` : ""}</th>${columns.map(column => {
+          const name = inverterField(index, gridSubField(source, column, metric.k));
+          if (edit) return `<td class="e">${slotHtml(name, metric)}</td>`;
+          const shown = gridFormat(metric, gridValue(metric.k, metric.unit, config[name], states), english);
+          return `<td>${escapeHtml(shown.text)}${shown.text === "—" || wide ? "" : `<small>${escapeHtml(shown.unit)}</small>`}</td>`;
+        }).join("")}${add ? "<td></td>" : ""}</tr>`).join("");
+        const sheet = edit && sel && sel !== "__runtime" && columns.some(column => gridSubMetrics.some(({ k }) => inverterField(index, gridSubField(source, column, k)) === sel)) ? o.sheet(sel) : "";
+        return `<div class="g-tbl" data-cols="${columns.length + (add ? 1 : 0)}"><table><caption>${escapeHtml(caption)}</caption>
+          <thead><tr><th scope="col">${escapeHtml(t("Reading", "Показ"))}</th>${columns.map(head).join("")}${add}</tr></thead><tbody>${rows}</tbody></table></div>${sheet}`;
+      }).join("") + (edit ? `<p class="g-note">${escapeHtml(source === "pv"
+        ? t("Each inverter's own readings, no averages. Without a total solar power the Power tile adds the inputs up.", "Окремі значення кожного інвертора, без середніх. Якщо загальної потужності немає — кубик «Потужність» складе входи.")
+        : t("Each inverter's own readings, no averages. If voltage or current is not linked in the tiles, the tile averages these phases.", "Окремі значення кожного інвертора, без середніх. Якщо напругу чи струм у кубиках не прив'язано, кубик рахує середнє з цих фаз."))}</p>` : "");
+    }
+    // Battery runtime block
+    let runtime = "";
+    if (layout.runtime) {
+      if (edit) {
+        const capacity = batteryCapacityOf(config, states);
+        const cutoff = runtimeCutoffOf(config, states);
+        const fmt = english ? englishMeasurementFormat : measurementFormat;
+        const origin = { manual:t("typed in", "вказано вручну"), banks:t("from the banks", "з ємностей АКБ"), sensor:t("from the sensor", "із сенсора"), ah:t("Ah × voltage", "А·год × напруга") };
+        runtime = `<button type="button" class="g-rt e ${capacity ? "ok" : "empty"}${sel === "__runtime" ? " sel" : ""}" style="order:0" data-gslot="__runtime">
+          <span>⏱ ${escapeHtml(t("Estimated time", "Розрахунковий час"))}</span><b>${capacity ? escapeHtml(t(`${fmt.format(Math.round(capacity.kwh * 10) / 10)} kWh · to ${fmt.format(cutoff)} %`, `${fmt.format(Math.round(capacity.kwh * 10) / 10)} кВт·год · до ${fmt.format(cutoff)} %`)) : escapeHtml(t("+ Set battery capacity", "+ Вказати ємність АКБ"))}</b>
+          <small>${escapeHtml(capacity ? t(`capacity ${origin[capacity.source]}`, `ємність ${origin[capacity.source]}`) + (config.battery_runtime_cutoff === undefined || config.battery_runtime_cutoff === "" ? t(" · default threshold", " · поріг типовий") : "") : t("without capacity the time is not calculated", "без ємності час не рахується"))}</small></button>`;
+      } else {
+        const info = runtimeInfo(config, states, o.soc ?? combinedSoc(config, states), t);
+        runtime = `<div class="g-rt${info.charging ? " chg" : ""}" style="order:0"><span>${escapeHtml(info.label)}</span><b>${escapeHtml(info.value)}</b><small>${escapeHtml(info.note)}</small></div>`;
+      }
+    }
+    let sheet = "";
+    if (edit && sel === "__runtime") sheet = o.runtimeSheet();
+    else if (edit && sel) {
+      const position = layout.tiles.findIndex(tile => indices.some(index => inverterField(index, tile.field) === sel));
+      if (position >= 0) {
+        const rowEnd = layout.runtime ? (position < 2 ? 2 : 5) : layout.tiles.length;
+        sheet = o.sheet(sel, rowEnd * 2 + 1);
+      }
+    }
+    const tiles = `<dl class="g-tiles" data-n="${layout.runtime ? "bat" : layout.tiles.length}">${runtime}${layout.tiles.map((tile, k) => tileHtml(tile, k + 1)).join("")}${sheet}</dl>`;
+    const subButton = layout.sub && gridHasSub(config, source)
+      ? `<div class="g-row"><button type="button" class="g-btn" data-gact="sub">${escapeHtml(source === "pv" ? t("By PV input", "По входах PV") : t("By phase L1 · L2 · L3", "По фазах L1 · L2 · L3"))} ›</button></div>` : "";
+    const chartButton = layout.chartPage ? `<div class="g-row"><button type="button" class="g-btn" data-gact="chart">${escapeHtml(t("Power graph · 24 h", "Графік потужності · 24 год"))} ›</button></div>` : "";
+    const banks = !edit && o.dual ? `<div class="g-tbl"><table><caption>${escapeHtml(t("Individual batteries", "Окремі АКБ"))}</caption>
+      <thead><tr><th scope="col">${escapeHtml(t("Reading", "Показ"))}</th>${batteryColumns.map((_, k) => `<th scope="col">${escapeHtml(t(`Battery ${k + 1}`, `АКБ ${k + 1}`))}</th>`).join("")}</tr></thead>
+      <tbody>${layout.tiles.filter(tile => tile.k !== "soc").map(tile => `<tr><th scope="row">${L(tile.label)}</th>${batteryColumns.map(({ prefix }) => {
+        const shown = gridFormat(tile, gridValue(tile.k, tile.unit, config[`${prefix}_${tile.k}`], states), english);
+        return `<td>${escapeHtml(shown.text)}${shown.text === "—" ? "" : `<small>${escapeHtml(shown.unit)}</small>`}</td>`;
+      }).join("")}</tr>`).join("")}</tbody></table></div>` : "";
+    return tiles + subButton + chartButton + banks;
+  }
+
+  const gridStyles = `
+    .g-tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:5px;margin:9px 9px 7px}
+    .g-tiles[data-n="3"]{grid-template-columns:repeat(3,minmax(0,1fr))}
+    .g-tiles[data-n="bat"]{grid-template-columns:repeat(6,minmax(0,1fr))}
+    .g-tile.half{grid-column:span 3}.g-tile.third{grid-column:span 2}
+    .g-tile{min-width:0;margin:0;padding:5px 3px 6px;text-align:center;border:1px solid var(--details-metric-edge);border-radius:4px;background:var(--details-metric-face);display:flex;flex-direction:column;align-items:center;gap:1px;position:relative}
+    .g-tile dt{color:var(--details-muted);font-size:clamp(10px,2.9cqi,14px);overflow-wrap:anywhere}
+    .g-tile dd{margin:1px 0 0;font-size:clamp(13px,4.4cqi,22px);font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}
+    .g-tile dd small{margin-inline-start:.22em;font-size:.58em;font-weight:600;color:var(--details-muted)}
+    .g-agg{font-size:clamp(8.5px,2.3cqi,11px);color:var(--details-muted);opacity:.85;margin-top:-1px}
+    .g-split{align-self:stretch;margin-top:3px;padding-top:3px;border-top:1px solid var(--details-rule);display:grid;gap:1px;font-size:clamp(9.5px,2.65cqi,12.5px);font-variant-numeric:tabular-nums}
+    .g-split span{display:flex;justify-content:space-between;gap:3px;padding:0 3px}
+    .g-split i{font-style:normal;color:var(--details-muted)}
+    .g-split b{font-weight:700}
+    .g-stat{display:grid;place-items:center;width:clamp(22px,6.4cqi,30px);height:clamp(22px,6.4cqi,30px);margin:2px 0 0;color:var(--details-muted)}
+    .g-stat svg{width:100%;height:100%}
+    .g-stat-t{font-size:clamp(10px,2.9cqi,13.5px);font-weight:700}
+    .dotok{color:#2fbf6a}.dotbad{color:#e5392b}
+    .g-rt{grid-column:1/-1;display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:baseline;gap:2px 10px;padding:7px 10px 8px;border:1px solid var(--details-metric-edge);border-radius:4px;background:var(--details-metric-face);color:inherit;font:inherit;text-align:left;min-height:0}
+    .g-rt span{color:var(--details-muted);font-size:clamp(11px,3.1cqi,15px)}
+    .g-rt b{font-size:clamp(16px,5cqi,24px);font-weight:700;text-align:end;font-variant-numeric:tabular-nums}
+    .g-rt small{grid-column:1/-1;color:var(--details-muted);font-size:clamp(10px,2.8cqi,13px)}
+    .g-rt.chg b{color:#2fbf6a}
+    .g-row{display:flex;gap:6px;margin:0 9px 7px}
+    .g-btn{display:flex;align-items:center;justify-content:center;gap:6px;box-sizing:border-box;min-width:38px;min-height:34px;padding:0 9px;border:1px solid var(--details-metric-edge);border-radius:4px;background:var(--details-metric-face);color:inherit;cursor:pointer;font:600 13px var(--lcd-font,Roboto,Arial,sans-serif);touch-action:manipulation}
+    .g-row .g-btn{flex:1}
+    .g-btn:focus-visible{outline:2px solid var(--details-focus);outline-offset:2px}
+    .g-tbl{margin:0 9px 7px;border:1px solid var(--details-metric-edge);border-radius:4px;background:var(--details-metric-face)}
+    .g-tiles+.g-tbl,.g-tbl:first-child{margin-top:9px}
+    .g-tbl table{width:100%;table-layout:fixed;border-collapse:collapse;font-variant-numeric:tabular-nums}
+    .g-tbl caption{padding:6px 7px;text-align:start;font-size:clamp(12px,3.3cqi,16px);font-weight:700}
+    .g-tbl th,.g-tbl td{border-top:1px solid var(--details-rule);padding:4px 3px;text-align:center;font-size:clamp(10px,3.1cqi,14px)}
+    .g-tbl th{color:var(--details-muted);font-weight:600}
+    .g-tbl th:first-child{width:29%;padding-inline-start:7px;text-align:start}
+    .g-tbl td{font-weight:700}
+    .g-tbl small{margin-inline-start:.25em;font-size:.72em;font-weight:600;color:var(--details-muted)}
+    .g-tbl[data-cols="5"] th,.g-tbl[data-cols="5"] td,.g-tbl[data-cols="6"] th,.g-tbl[data-cols="6"] td,.g-tbl[data-cols="7"] th,.g-tbl[data-cols="7"] td{font-size:clamp(9px,2.6cqi,12px);padding:3px 2px}
+    .g-tbl[data-cols="5"] th:first-child,.g-tbl[data-cols="6"] th:first-child,.g-tbl[data-cols="7"] th:first-child{width:22%}
+    .g-tbl .pvdel{margin-left:2px;border:0;background:#e5392b;color:#fff;border-radius:50%;width:16px;height:16px;min-height:0;line-height:16px;padding:0;font:700 11px Roboto,Arial;cursor:pointer}
+    .g-tbl th.pvadd{width:13%}
+    .g-tbl .pvadd .g-btn{min-width:0;width:100%;min-height:30px;padding:0;border:2px dashed #f2b632;color:#f2b632;background:#f2b6321a;font-size:16px;gap:2px}
+    .g-tbl .pvadd small{font-size:9px;color:#f2b632;margin:0}
+  `;
+
   const styles = `
     :host {
       display:block;
@@ -1349,7 +1766,7 @@
     .symbol { color:#101415; }
     .scale { fill:#24404e; font-size:13px; }
     .value,.unit,.soc,.soc-side,.parallel { text-anchor:middle; }
-    .value { fill:#165f49; font-size:16px; font-weight:600; }
+    .value { fill:#165f49; font-size:13.6px; font-weight:600; }
     .value[data-unavailable] { fill:#626a68; }
     .unit { fill:#17363c; font-size:9.5px; font-weight:600; }
     .soc { fill:#229d56; font-size:16px; font-weight:600; }
@@ -1680,7 +2097,7 @@
     }
     :host([data-theme="technika"]) .top { fill:#23291a; }
     :host([data-theme="technika"]) .track { stroke:#abb193; stroke-width:9; stroke-linecap:round; }
-    :host([data-theme="technika"]) .value { fill:#23291a; font-size:17.5px; font-weight:750; }
+    :host([data-theme="technika"]) .value { fill:#23291a; font-size:15px; font-weight:750; }
     :host([data-theme="technika"]) .value[data-unavailable] { fill:#4f5b4e; }
     :host([data-theme="technika"]) .scale { fill:#4b5238; font-size:11.5px; font-weight:550; }
     :host([data-theme="technika"]) .unit { fill:#4b5238; font-size:8.5px; font-weight:650; letter-spacing:.8px; }
@@ -2314,7 +2731,7 @@
     /* ── Олива · «Контрастна» (0.8.13): deeper olive icons, darker and bolder numbers, clearer scale ── */
     :host([data-theme="technika"][data-palette="olive"]:not([data-appearance="dark"])) .value,
     :host([data-theme="technika"][data-palette="olive"]:not([data-appearance="dark"])) .top { fill:#141a0e; }
-    :host([data-theme="technika"][data-palette="olive"]) .value { font-weight:800; font-size:18.5px; }
+    :host([data-theme="technika"][data-palette="olive"]) .value { font-weight:800; font-size:15.7px; }
     :host([data-theme="technika"][data-palette="olive"]:not([data-appearance="dark"])) .scale,
     :host([data-theme="technika"][data-palette="olive"]:not([data-appearance="dark"])) .unit { fill:#333a23; }
     :host([data-theme="technika"][data-palette="olive"]:not([data-appearance="dark"])) .track { stroke:#9aa27f; }
@@ -2352,6 +2769,19 @@
         transition:fill .35s ease,stroke .35s ease,stop-color .35s ease;
       }
     }
+
+    /* ── 0.8.29 · gauge windows (same layout as the editor) ── */
+    ${gridStyles}
+    .details-screen[data-page="chart"] .history-chart svg { min-height:220px; }
+    :host([data-editor-preview]) [data-generator] .hit { pointer-events:none; }
+    .details-screen .details-history-toggle { display:inline-flex; align-items:center; justify-content:center; width:auto; min-width:0; height:auto; padding:3px 11px; flex:none; }
+    .details-screen .details-history-toggle[aria-pressed="true"] { background:var(--details-ink); color:#0d2340; }
+    :host([data-appearance="dark"]) .details-screen .details-history-toggle[aria-pressed="true"],
+    :host([data-theme="classic"][data-appearance="dark"]) .details-screen .details-history-toggle[aria-pressed="true"] { color:#050608; }
+    :host([data-theme="technika"]:not([data-appearance="dark"])) .details-screen .details-history-toggle[aria-pressed="true"] { color:#f6faf3; }
+    /* Editor preview: the main screen without T, clock, weekday and gear; the editor draws its own rings on top. */
+    :host([data-editor-preview]) :is([data-open-appearance],[data-clock-tap],[data-weekday],[data-gear]) { visibility:hidden; }
+    :host([data-editor-preview]) .screen { pointer-events:none; }
   `;
 
   const inverterCount = (config) => {
@@ -2416,6 +2846,9 @@
         pvInputs.map(n => entity(inverterField(index, `pv_${n}_power`), t(`PV${n} · power`, `PV${n} · потужність`), "sensor",
           n === 1 ? t("Only when there is no total solar power sensor: the card adds the inputs together.",
             "Лише якщо немає загальної потужності сонця: картка складе входи разом.") : undefined))));
+      if (source === "pv") settings.push(entity(inverterField(index, "pv_energy_today"), t("Produced today", "Вироблено сьогодні")),
+        entity(inverterField(index, "pv_energy_total"), t("Produced in total", "Вироблено всього")));
+      if (source === "load") settings.push(entity(inverterField(index, "load_energy_today"), t("Consumed today", "Спожито сьогодні")));
       if (source === "battery") {
         settings.push(entity(inverterField(index, "battery_soc"), t("Battery charge · SOC", "Заряд АКБ · SOC")));
         if (parallel && batterySeparate(config)) {
@@ -2507,7 +2940,8 @@
         ...installedInverters(config).map(index => {
           const fields = [
             ...inverterSources(index),
-            group(`screen_${index}_generator`, t("Generator", "Генератор"), readings(index, "generator", acMeasurements)),
+            group(`screen_${index}_generator`, t("Generator", "Генератор"), [...readings(index, "generator", acMeasurements),
+              entity(inverterField(index, "generator_energy_today"), t("Generator today", "Генератор сьогодні")), ...phases(index, "generator")]),
             ...(index === 0 ? [
               entity("inverter_status", t("Inverter status", "Статус інвертора")),
               text("parallel_id", t("Parallel label", "Позначка паралельної роботи")),
@@ -2875,11 +3309,71 @@
     .v-sheet .v-pick em{font-style:normal;font-size:.82em;color:#b9d79a;flex:none;max-width:35%;overflow:hidden;text-overflow:ellipsis}
     .v-sheet .v-pick.current{border-color:#2fbf6a}
     .v-empty{color:#9fb7cc;font-size:.9em}
+${gridStyles}
+    /* ── 0.8.29 · visual «Main screen» editor ── */
+    .ms-wrap{position:relative;margin:3px;border-radius:12px;outline:3px solid #f2b632;outline-offset:2px;container-type:inline-size}
+    .ms-host{display:block}
+    .ms-ov{position:absolute;inset:0;pointer-events:none}
+    .ms-ov .ms-hot{position:absolute;pointer-events:auto;box-sizing:border-box;min-height:0;padding:0;border-radius:50%;cursor:pointer;border:2.5px dashed #f2b632;background:#f2b63214}
+    .ms-ov .ms-hot.ok{border:2.5px solid #2fbf6a;background:transparent}
+    .ms-ov .ms-hot.part{border:2.5px solid #f2b632;background:transparent}
+    .ms-ov .ms-hot:hover{box-shadow:0 0 0 3px #ffdf8466}
+    .ms-chip{position:absolute;transform:translate(-50%,-50%);pointer-events:none;padding:1px 8px;border-radius:9px;font:700 12px/1.5 Roboto,Arial,sans-serif;white-space:nowrap;background:#f2b632;color:#2a1e05;box-shadow:0 1px 3px #0006}
+    .ms-chip.ok{background:#2fbf6a;color:#06210f}
+    .ms-band{position:absolute;display:flex;align-items:center;gap:8px;padding:0 12px;box-sizing:border-box;border-radius:6px 6px 0 0;pointer-events:none;
+      background:repeating-linear-gradient(135deg,#f2b632 0 14px,#e0a21e 14px 28px);color:#2a1e05}
+    .ms-band b{font-size:14px;white-space:nowrap}.ms-band span{font-size:12px;opacity:.85;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+    .v-ring{display:inline-block;width:12px;height:12px;border-radius:50%;box-sizing:border-box}
+    .v-ring.empty{border:2px dashed #f2b632}.v-ring.part{border:2px solid #f2b632}.v-ring.ok{border:2px solid #2fbf6a}
+    .g-ed{--details-ink:#f0faff;--details-muted:#d7edff;--details-rule:#b4dcec56;--details-metric-edge:#a4dbf085;--details-metric-face:#1332704f;--details-plot-face:#0d275e50;--details-focus:#ffe38a;
+      position:relative;margin:3px;border-radius:5px;overflow:hidden;container-type:inline-size;outline:3px solid #f2b632;outline-offset:2px;
+      background:linear-gradient(180deg,#362382 12%,#254698 52%,#08768d 100%);color:var(--details-ink);font:400 14px/1.3 Roboto,Arial,sans-serif}
+    .g-ed.dark{--details-ink:#f4faff;--details-muted:#9fb4c0;--details-rule:#1f2a31;--details-metric-edge:#22465c;--details-metric-face:#0b1116;--details-plot-face:#0a0e12;background:#050608}
+    .g-ed .g-head{display:flex;align-items:center;gap:8px;min-height:44px;padding:0 10px;border-bottom:2px solid #f2b632;
+      background:repeating-linear-gradient(135deg,#f2b632 0 14px,#e0a21e 14px 28px);color:#2a1e05}
+    .g-ed .g-head h2{margin:0;font-size:clamp(15px,4.4cqi,22px);font-weight:700;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .g-ed .g-head em{font-style:normal;font-weight:700;font-size:12px;padding:3px 8px;border-radius:4px;background:#2a1e05;color:#f2b632;white-space:nowrap}
+    .g-ed .g-head em.ok{color:#7ff0a8}
+    .g-ed .g-head .g-btn{min-height:36px;height:36px;border-color:#2a1e05;background:#2a1e0522;color:#2a1e05}
+    .g-ed .g-btn{border-radius:4px;min-height:34px;padding:0 9px}
+    .g-ed .g-btn svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+    .g-ed .g-tile.e{padding-top:16px}
+    .g-num{position:absolute;left:3px;top:3px;width:15px;height:15px;border-radius:50%;background:#f2b632;color:#2a1e05;font:800 10px/15px Roboto,Arial;text-align:center}
+    .g-num.ok{background:#2fbf6a;color:#06210f}
+    .g-tile .key{position:absolute;right:3px;top:2px;font-size:9px;font-weight:800;color:#f2b632;letter-spacing:.02em}
+    .slots{align-self:stretch;display:grid;gap:3px;margin-top:3px}
+    .g-ed .slot{display:flex;align-items:center;justify-content:center;gap:3px;min-height:26px;width:100%;padding:1px 2px;border-radius:3px;font:700 clamp(10px,2.9cqi,13px) Roboto,Arial;font-variant-numeric:tabular-nums;cursor:pointer;
+      border:1px solid var(--details-metric-edge);background:#def4ed;color:#12284e;box-shadow:inset 3px 0 0 #2fbf6a;white-space:nowrap;overflow:hidden}
+    .g-ed.dark .slot{background:#13202a;color:#fff}
+    .g-ed .slot i{font-style:normal;font-weight:600;opacity:.7;font-size:.85em}
+    .g-ed .slot.empty{border:2px dashed #f2b632;background:#f2b6321f;color:#f2b632;box-shadow:none}
+    .g-ed .slot.derived{cursor:default;border:1px solid var(--details-metric-edge);background:repeating-linear-gradient(135deg,#ffffff14 0 4px,transparent 4px 8px);color:var(--details-muted);box-shadow:none;font-weight:600}
+    .g-ed .slot.sel,.g-ed .g-rt.sel{outline:3px solid #ffdf84;outline-offset:1px;z-index:1}
+    .g-ed .g-tbl td.e{padding:3px}
+    .g-ed .g-tbl .slot{min-height:24px}
+    .g-ed .g-tbl[data-cols="6"] .slot,.g-ed .g-tbl[data-cols="7"] .slot{font-size:10px;min-height:22px}
+    .g-ed .g-rt.e{cursor:pointer;box-shadow:inset 3px 0 0 #2fbf6a;border-radius:4px;min-height:0}
+    .g-ed .g-rt.e b{font-size:clamp(12px,3.6cqi,16px)}
+    .g-ed .g-rt.e.empty{border:2px dashed #f2b632;background:#f2b6321f;box-shadow:none}.g-ed .g-rt.e.empty b{color:#f2b632}
+    .g-ed .g-tbl .pvdel{min-height:0}
+    .g-hist{margin:0 9px 9px;padding:5px 7px 0;border:1px solid var(--details-metric-edge);border-radius:4px;background:var(--details-plot-face);opacity:.55}
+    .g-hist h3{margin:0;font-size:clamp(12px,3.3cqi,16px)}
+    .g-hist-plot{height:90px;background:linear-gradient(to top,var(--details-rule) 1px,transparent 1px) 0 0/100% 33%}
+    .g-hist-plot.big{height:200px}
+    .g-note{margin:0 9px 9px;padding:6px 8px;border-radius:4px;border:1px dashed var(--details-metric-edge);color:var(--details-muted);font-size:12px;line-height:1.35}
+    .g-ed .v-sheet{margin:2px 0 4px;color:#eaf3fb;font-size:14px}
+    .v-sheet .v-step{display:block;color:#ffe2a0}
+    .v-sheet .v-pick.best{border-color:#f2b632}
+    .v-sheet .v-best{color:#f2b632;font-weight:700}
+    .v-field{display:grid;gap:4px;font-size:13px;color:#9fb7cc}
+    .v-sheet .v-field input{width:100%;padding:9px 12px;border-radius:8px;border:1px solid #3c5a76;background:#0f1f30;color:#eaf3fb;font:inherit}
+    .v-nav2{display:flex;gap:6px}.v-nav2 button{flex:1}
     @container (max-width:560px){.workspace{grid-template-columns:minmax(0,1fr)}.side{grid-template-columns:repeat(2,minmax(0,1fr))}}
     @container (max-width:340px){.tabs button,.pages button{font-size:.88em;padding:6px}.pane{padding:9px}}
   `;
 
   const editorViewKey = "deye-lcd-tehnika:editor-menu-view";
+  const editorScreenViewKey = "deye-lcd-tehnika:editor-screen-view";
   const visualScreen = { w:400, h:268 };
   // Native fields that are stored under other keys: Gen Start / Grid Start are % (SOC) entities, with volts as an extra.
   const visualRedirects = { generator_start: "generator_charge_start_soc", grid_start: "grid_charge_start_soc" };
@@ -2958,6 +3452,10 @@
       this.activePeriod = 1;
       this.matchDevices = new Map();
       try { this.menuView = localStorage.getItem(editorViewKey) === "list" ? "list" : "visual"; } catch { this.menuView = "visual"; }
+      try { this.screenView = localStorage.getItem(editorScreenViewKey) === "list" ? "list" : "visual"; } catch { this.screenView = "visual"; }
+      this.gridSource = "";
+      this.gridPage = "main";
+      this.gridSel = "";
       this.visualField = "";
       this.attachShadow({ mode:"open" });
       this.shadowRoot.innerHTML = `<style>${editorStyles}</style>
@@ -2972,7 +3470,8 @@
       });
       this.modal.addEventListener("close", () => { if (!this.modal.open) this.matchContext = null; });
       this.layout.addEventListener("click", event => this.navigate(event));
-      this.layout.addEventListener("input", event => this.visualInput(event));
+      this.layout.addEventListener("input", event => { if (!this.screenInput(event)) this.visualInput(event); });
+      this.layout.addEventListener("change", event => this.screenChange(event));
       // Pointing at any item of a shared-entity group lights up the whole group, so it reads as one setting.
       const hover = (event, on) => {
         const item = event.target.closest?.(".v-body [data-vfield]");
@@ -2995,6 +3494,9 @@
     set hass(hass) {
       this.hassData = hass;
       if (this.form) this.form.hass = hass;
+      if (this.previewCard?.isConnected) {
+        try { this.previewCard.hass = hass; } catch { /* preview only */ }
+      }
     }
 
     setConfig(config) {
@@ -3061,7 +3563,8 @@
 
       const subgroups = section.schema.filter(item => item.schema);
       const active = subgroups.find(item => item.name === this.activePage) ?? subgroups[0];
-      const visual = this.tab === "menus" && this.menuView !== "list";
+      const screenVisual = this.tab === "screen" && this.screenView !== "list";
+      const visual = this.tab === "menus" && this.menuView !== "list" || screenVisual;
       const periodPage = !visual && this.tab === "menus" && active?.name === "menu_work_1";
       const groupSchema = periodPage ? active.schema.filter(field =>
         !/^tou_[1-6]_/.test(field.name) || field.name.startsWith(`tou_${this.activePeriod}_`))
@@ -3095,7 +3598,7 @@
         const sidebar = this.tab === "general" || visual ? "" : `<nav class="side" aria-label="${t("Sections", "Розділи")}">
           ${sections.map(item => button("section", item.name, item.title, item===section,
             this.tab === "screen" ? '<span class="count" aria-hidden="true"></span>' : "")).join("")}</nav>`;
-        const label = this.tab === "general" ? t("General", "Загальне") : visual ? t("Inverter menus", "Меню інвертора") : section.title;
+        const label = this.tab === "general" ? t("General", "Загальне") : screenVisual ? t("Main screen", "Головний екран") : visual ? t("Inverter menus", "Меню інвертора") : section.title;
         const pageTitle = (item) => {
           const phase = /_l([123])$/.exec(item.name);
           if (phase) return t(`L${phase[1]}`, `Ф${phase[1]}`);
@@ -3116,6 +3619,8 @@
           ${this.tab === "menus" && inverterTotal>1 ? `<p class="note">${t("Master inverter entities", "Сутності інвертора Master")}</p>` : ""}
           ${this.tab === "menus" ? `<div class="view-toggle" role="group" aria-label="${t("Editor view", "Вигляд редактора")}"><span>${t("View:", "Вигляд:")}</span>
             ${button("view", "visual", t("Menu", "Меню"), visual)}${button("view", "list", t("List", "Список"), !visual)}</div>` : ""}
+          ${this.tab === "screen" ? `<div class="view-toggle" role="group" aria-label="${t("Editor view", "Вигляд редактора")}"><span>${t("View:", "Вигляд:")}</span>
+            ${button("view", "visual", t("Screen", "Екран"), screenVisual)}${button("view", "list", t("List", "Список"), !screenVisual)}</div>` : ""}
           ${pageButtons}${periodButtons}${visual ? '<div class="visual-slot"></div>' : '<div class="form-slot"></div>'}</section></div>`;
         if (!visual) this.layout.querySelector(".form-slot").append(this.form);
         Object.assign(this.form, { schema:fields, computeLabel, computeHelper });
@@ -3144,7 +3649,8 @@
         for (const item of sections) updateCount(item, "section");
         for (const item of subgroups) updateCount(item, "page");
       }
-      if (visual) this.renderVisual();
+      if (screenVisual) this.renderScreen();
+      else if (visual) this.renderVisual();
       if (focus) this.layout.querySelector(focus)?.focus({ preventScroll:true });
     }
 
@@ -3153,13 +3659,21 @@
       if (!button) return;
       const args = button.dataset;
       if (args.match !== undefined) { this.matchIntro(); return; }
+      if (this.screenAction(args)) return;
       if (this.visualAction(args)) return;
       if (args.view) {
-        this.menuView = args.view === "list" ? "list" : "visual";
-        try { localStorage.setItem(editorViewKey, this.menuView); } catch { /* kept for this session */ }
-        this.visualField = "";
+        const view = args.view === "list" ? "list" : "visual";
+        if (this.tab === "screen") {
+          this.screenView = view;
+          try { localStorage.setItem(editorScreenViewKey, view); } catch { /* kept for this session */ }
+          this.gridSource = ""; this.gridSel = "";
+        } else {
+          this.menuView = view;
+          try { localStorage.setItem(editorViewKey, view); } catch { /* kept for this session */ }
+          this.visualField = "";
+        }
         this.notice.textContent = "";
-        this.render(`[data-view="${this.menuView}"]`);
+        this.render(`[data-view="${view}"]`);
         return;
       }
       if (args.tab) {
@@ -3184,6 +3698,407 @@
       const [type, value] = Object.entries(args)[0];
       this.notice.textContent = "";
       this.render(`[data-${type}="${value}"]`);
+    }
+
+    /* ── 0.8.29 · visual «Main screen» editor ── */
+    screenStates() { return this.hassData?.states ?? {}; }
+
+    renderScreen() {
+      const slot = this.layout.querySelector(".visual-slot");
+      if (!slot) return;
+      if (this.gridSource) { this.renderGridEditor(slot); return; }
+      const t = this.t.bind(this);
+      if (!this.previewCard) {
+        this.previewCard = document.createElement(cardTag);
+        this.previewCard.editorPreview = true;
+        this.previewCard.setAttribute("data-editor-preview", "");
+        this.previewObserver = new ResizeObserver(() => this.placeRings());
+      }
+      let host = slot.querySelector(".ms-host");
+      if (!host) {
+        slot.innerHTML = `<div class="ms-wrap"><div class="ms-host"></div><div class="ms-ov"></div></div>
+          <p class="v-legend"><span><i class="v-ring empty"></i>${escapeHtml(t("no power linked", "немає потужності"))}</span>
+          <span><i class="v-ring part"></i>${escapeHtml(t("partly", "частково"))}</span><span><i class="v-ring ok"></i>${escapeHtml(t("all linked", "усе прив’язано"))}</span></p>
+          <p class="note">${escapeHtml(t("Inverter status, generator and the parallel label are in the «List» view. «Auto» works for the inverter selected above.", "Статус інвертора, генератор і позначка паралелі — у вигляді «Список». «Авто» працює для інвертора, вибраного вгорі."))}</p>`;
+        host = slot.querySelector(".ms-host");
+        host.append(this.previewCard);
+        this.previewObserver.disconnect();
+        this.previewObserver.observe(host);
+      }
+      try {
+        this.previewCard.setConfig({ ...this.config });
+        if (this.hassData) this.previewCard.hass = this.hassData;
+      } catch { /* the preview must never break the editor */ }
+      requestAnimationFrame(() => requestAnimationFrame(() => this.placeRings()));
+    }
+
+    placeRings() {
+      const overlay = this.layout?.querySelector(".ms-ov");
+      const card = this.previewCard;
+      const root = card?.shadowRoot;
+      if (!overlay || !root || this.gridSource) return;
+      const t = this.t.bind(this);
+      const box = overlay.getBoundingClientRect();
+      const svg = root.querySelector("svg.screen");
+      const area = svg?.getBoundingClientRect();
+      if (!area || !area.width) return;
+      const config = this.modeConfig();
+      const states = this.screenStates();
+      const scale = area.width / 400;
+      let html = `<div class="ms-band" style="top:${(area.top - box.top).toFixed(1)}px;left:${(area.left - box.left).toFixed(1)}px;width:${area.width.toFixed(1)}px;height:${(34 * scale).toFixed(1)}px">
+        <b>⚙ ${escapeHtml(t("Main screen", "Головний екран"))}</b><span>${escapeHtml(t("tap a gauge", "торкніться шкали"))}</span></div>`;
+      for (const gauge of gaugeLayout) {
+        const group = root.querySelector(`g.gauge[data-gauge="${gauge.key}"]`);
+        const track = group?.querySelector(".track");
+        const matrix = group?.getScreenCTM?.();
+        if (!matrix) continue;
+        // The ring is drawn from the dial geometry itself (centre and radius of the arc), so it matches in every theme.
+        const stroke = parseFloat(getComputedStyle(track).strokeWidth) || 9.7;
+        const unit = Math.hypot(matrix.a, matrix.b);
+        const radius = (gaugeRadius + stroke / 2) * unit + 4.5;
+        const cx = matrix.e - box.left, cy = matrix.f - box.top;
+        const { done, total, state } = gridProgress(config, states, gauge.source);
+        const label = local(pair(gauge.english, gauge.label), this.config);
+        html += `<button type="button" class="ms-hot ${state}" data-gsource="${gauge.source}" style="left:${(cx - radius).toFixed(1)}px;top:${(cy - radius).toFixed(1)}px;width:${(2 * radius).toFixed(1)}px;height:${(2 * radius).toFixed(1)}px"
+          aria-label="${escapeHtml(`${label} · ${done} / ${total}`)}"></button>
+          <span class="ms-chip ${state === "ok" ? "ok" : ""}" style="left:${cx.toFixed(1)}px;top:${(cy - radius - 9).toFixed(1)}px">${done} / ${total}</span>`;
+      }
+      // Generator: a ring around its block under the status circle (shown in the preview even when it is off).
+      const generator = root.querySelector("[data-generator]");
+      const screenMatrix = svg.getScreenCTM?.();
+      if (generator && !generator.hasAttribute("hidden") && screenMatrix) {
+        const unit = Math.hypot(screenMatrix.a, screenMatrix.b);
+        const cx = screenMatrix.a * 197.5 + screenMatrix.c * 214.5 + screenMatrix.e - box.left;
+        const cy = screenMatrix.b * 197.5 + screenMatrix.d * 214.5 + screenMatrix.f - box.top;
+        const radius = 47 * unit;
+        const { done, total, state } = gridProgress(config, states, "generator");
+        html += `<button type="button" class="ms-hot ${state}" data-gsource="generator" style="left:${(cx - radius).toFixed(1)}px;top:${(cy - radius).toFixed(1)}px;width:${(2 * radius).toFixed(1)}px;height:${(2 * radius).toFixed(1)}px"
+          aria-label="${escapeHtml(`${t("Generator", "Генератор")} · ${done} / ${total}`)}"></button>
+          <span class="ms-chip ${state === "ok" ? "ok" : ""}" style="left:${cx.toFixed(1)}px;top:${(cy + radius + 2).toFixed(1)}px">${done} / ${total}</span>`;
+      }
+      overlay.innerHTML = html;
+    }
+
+    gridPageProgress(config, source) {
+      if (this.gridPage !== "sub") return gridProgress(config, this.screenStates(), source);
+      const order = gridOrder(config, source, "sub");
+      const done = order.filter(name => hasEditorBinding(config[name])).length;
+      return { done, total:order.length };
+    }
+
+    renderGridEditor(slot) {
+      const t = this.t.bind(this);
+      const config = this.modeConfig();
+      const source = this.gridSource;
+      const layout = gridLayouts[source];
+      const english = preferEnglish(this.config);
+      const gauge = gaugeOfSource(source);
+      if (this.gridPage === "sub" && !gridHasSub(config, source)) this.gridPage = "main";
+      const page = this.gridPage;
+      const { done, total } = this.gridPageProgress(config, source);
+      const suffix = page === "sub" ? (source === "pv" ? t(" · by input", " · по входах") : t(" · by phase", " · по фазах")) : page === "chart" ? t(" · graph", " · графік") : "";
+      const back = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 6l-6 6 6 6m-6-6h12"/></svg>';
+      const head = `<header class="g-head"><button type="button" class="g-btn" data-gback aria-label="${escapeHtml(t("Back", "Назад"))}">${back}</button>
+        <h2>${escapeHtml(t("Settings · ", "Налаштування · ") + local(gridShortNames[source], this.config) + suffix)}</h2>
+        ${page === "chart" ? "" : `<em class="${done === total ? "ok" : ""}">${done} / ${total}</em>`}</header>`;
+      const history = `<section class="g-hist"><h3>${escapeHtml(gridInverters(config, source).length > 1 ? t("Combined power · 24 h", "Загальна потужність · 24 год") : t("Power · 24 h", "Потужність · 24 год"))}</h3>
+        <div class="g-hist-plot${page === "chart" ? " big" : ""}"></div></section>
+        <p class="g-note">${escapeHtml(t("The graph needs no setup — it uses the history of «Power».", "Графік окремо не налаштовується — він бере історію з «Потужності»."))}</p>`;
+      const body = page === "chart" ? history : gridBodyHtml({
+        config, states:this.screenStates(), source, page, edit:true, sel:this.gridSel, t, english,
+        sheet:(name, order) => this.gridSheetHtml(name, order), runtimeSheet:() => this.runtimeSheetHtml(),
+      }) + (page === "main" && !layout.chartPage ? history : "");
+      const dark = this.hassData?.themes?.darkMode === true;
+      slot.innerHTML = `<div class="g-ed${dark ? " dark" : ""}">${head}${body}</div>`;
+      if (this.gridScroll) {
+        this.gridScroll = false;
+        slot.querySelector(".v-sheet")?.scrollIntoView({ block:"nearest", behavior:"smooth" });
+      }
+    }
+
+    gridField(name) {
+      const index = Number(/^inverter_(\d)_/.exec(name)?.[1] ?? 1) - 1;
+      const key = index ? name.replace(/^inverter_\d_/, "") : name;
+      const source = this.gridSource;
+      const tile = gridLayouts[source].tiles.find(item => item.field === key);
+      if (tile) return { index, key, tile, step:gridLayouts[source].tiles.indexOf(tile) + 1 };
+      const sub = new RegExp(`^${source}_(l[123]|[1-6])_(voltage|current|power)$`).exec(key);
+      if (!sub) return null;
+      const metric = gridSubMetrics.find(item => item.k === sub[2]);
+      return { index, key, tile:{ ...metric, dom:"sensor" }, column:sub[1], step:0 };
+    }
+
+    gridTerms(field) {
+      const special = {
+        pv_power:["pv power", "solar power"], pv_energy_today:["today production", "daily production", "pv energy today", "today pv"],
+        pv_energy_total:["total production", "total pv", "pv energy total"], grid_power:["grid power", "external ct power"],
+        grid_connected:["grid", "grid connected", "grid connection"], battery_soc:["battery", "battery soc", "state of charge"],
+        battery_temperature:["battery temperature"], load_energy_today:["today load consumption", "daily load consumption", "load today"],
+        generator_power:["generator power", "gen power"], generator_energy_today:["generator energy today", "today generator", "generator today"],
+      };
+      if (special[field.key]) return special[field.key];
+      if (field.column) {
+        const metric = field.tile.k;
+        if (/^\d$/.test(field.column)) return [`pv${field.column} ${metric}`, `pv ${field.column} ${metric}`];
+        return [`${this.gridSource} ${field.column} ${metric}`, `${this.gridSource} ${metric} ${field.column}`];
+      }
+      return [field.key.replace(/_/g, " ")];
+    }
+
+    gridAnchors() {
+      // The device of each inverter, taken from its already linked power entities.
+      const entities = editorEntities(this.hassData);
+      return installedInverters(this.config).map(index => {
+        for (const key of ["battery_power", "grid_power", "load_power", "pv_power", "inverter_status", "battery_soc"]) {
+          const id = this.config[inverterField(index, key)];
+          const device = id && entities[id]?.device_id;
+          if (device) return device;
+        }
+        return null;
+      });
+    }
+
+    gridCandidates(name) {
+      const field = this.gridField(name);
+      if (!field) return { field, list:[] };
+      const states = this.screenStates();
+      const units = { kw:["w", "kw", "вт", "квт"], v:["v", "в", "mv", "kv"], a:["a", "а", "ma"], kwh:["kwh", "wh", "mwh", "квт·год"],
+        pct:["%"], c:["°c", "°f", "°с"] }[field.tile.unit];
+      const terms = this.gridTerms(field);
+      const anchors = this.gridAnchors();
+      const entities = editorEntities(this.hassData);
+      const query = visualWords(this.gridSearch);
+      const list = Object.values(states).filter(entity => entity.entity_id.split(".")[0] === field.tile.dom).filter(entity => {
+        if (!query.length) return true;
+        const text = `${entity.attributes?.friendly_name ?? ""} ${entity.entity_id}`.toLowerCase();
+        return query.every(word => text.includes(word));
+      }).map(entity => {
+        const name = visualScore(terms, entity);
+        // Fewer extra words wins a tie: «Grid Power» before «Grid L1 Power».
+        let score = name - .04 * visualWords(entity.entity_id.split(".")[1].replace(/_/g, " ")).length;
+        const unit = String(entity.attributes?.unit_of_measurement ?? "").trim().toLowerCase();
+        if (units) score += units.includes(unit) ? .5 : -1.2;
+        if (field.tile.k === "temperature" && /\b(dc|radiator|heatsink|igbt|ac)\b/.test(visualWords(`${entity.attributes?.friendly_name ?? ""} ${entity.entity_id.replace(/_/g, " ")}`).join(" "))) score -= 1.5;
+        const device = entities[entity.entity_id]?.device_id;
+        if (device && anchors[field.index] === device) score += .6;
+        else if (device && anchors.some((anchor, k) => k !== field.index && anchor === device)) score -= .8;
+        return { entity, score, name, unitOk:!units || units.includes(unit) };
+      }).sort((a, b) => b.score - a.score || String(a.entity.attributes?.friendly_name ?? a.entity.entity_id).localeCompare(String(b.entity.attributes?.friendly_name ?? b.entity.entity_id)));
+      return { field, list };
+    }
+
+    gridHelp(field) {
+      const t = this.t.bind(this);
+      const help = {
+        grid_power:t("Grid exchange power, W or kW. With it the Grid gauge already works. Look for «Grid Power» or «External CT Power».", "Потужність обміну з мережею, W або kW. Після неї шкала Мережі вже працює. Шукайте «Grid Power» або «External CT Power»."),
+        grid_voltage:t("Grid voltage, V. On 3 phases it can be skipped — the tile averages L1–L3.", "Напруга мережі, V. На 3ф можна пропустити — кубик порахує середнє з L1–L3."),
+        grid_current:t("Grid current, A. On 3 phases it can be skipped — the tile averages the phases.", "Струм мережі, A. На 3ф можна пропустити — кубик візьме середнє з фаз."),
+        grid_connected:t("Binary sensor «Grid» (on / off). In parallel every inverter has its own: grid on one only shows ⚠.", "Двійковий сенсор «Grid» (on / off). У паралелі в кожного інвертора свій: мережа лише на одному — кубик покаже ⚠."),
+        pv_power:t("Total solar power, W. With it the Solar gauge already works. No total? Link the PV inputs — the card adds them up.", "Загальна потужність сонця, W. Після неї шкала Сонця вже працює. Якщо загальної немає — прив'яжіть входи PV, картка складе їх."),
+        pv_energy_today:t("Produced today, kWh («Today Production»).", "Вироблено сьогодні, kWh («Today Production»)."),
+        pv_energy_total:t("Produced in total, kWh («Total Production»).", "Вироблено за весь час, kWh («Total Production»)."),
+        battery_power:t("Battery power, W: charge / discharge. With it the gauge works, and with «Charge» it also shows the percent.", "Потужність АКБ, W: заряд / розряд. Після неї шкала працює, а з «Заряд» — ще й відсотки на шкалі."),
+        battery_soc:t("Battery charge in % (SOC). With a shared bank both inverters see the same %.", "Заряд АКБ у % (SOC). У паралелі зі спільною АКБ обидва інвертори бачать однаковий %."),
+        battery_voltage:t("Battery voltage, V.", "Напруга АКБ, V."), battery_current:t("Battery current, A. In parallel — the sum.", "Струм АКБ, A. У паралелі — сума."),
+        battery_temperature:t("Battery temperature, °C. Do not confuse with «DC Temperature» — that is the inverter heatsink.", "Температура АКБ, °C. Не плутайте з «DC Temperature» — це радіатор інвертора."),
+        load_power:t("Load power, W. With it the Load gauge already works.", "Потужність навантаження, W. Після неї шкала Навантаження вже працює."),
+        load_voltage:t("Load output voltage, V. On 3 phases it can be skipped — the phase average is used.", "Напруга на виході навантаження, V. На 3ф можна пропустити — середнє з фаз."),
+        load_current:t("Load current, A. On 3 phases it can be skipped.", "Струм навантаження, A. На 3ф можна пропустити."),
+        load_energy_today:t("Consumed today, kWh («Today Load Consumption»).", "Спожито сьогодні, kWh («Today Load Consumption»)."),
+        generator_power:t("Generator power, W. With it the generator window works. In parallel, «Generator power source» in the List view decides whether one total sensor or the sum of all inverters is used.", "Потужність генератора, W. Після неї вікно генератора вже працює. У паралелі «Джерело потужності генератора» (вигляд «Список» → Загальне) визначає: один сумарний датчик чи сума всіх інверторів."),
+        generator_voltage:t("Generator voltage, V. On 3 phases it can be skipped — the phase average is used.", "Напруга генератора, V. На 3ф можна пропустити — середнє з фаз."),
+        generator_current:t("Generator current, A. On 3 phases it can be skipped — the phase average is used.", "Струм генератора, A. На 3ф можна пропустити — середнє з фаз."),
+        generator_energy_today:t("Generator energy today, kWh («Generator Energy - today»).", "Енергія генератора за сьогодні, kWh («Generator Energy - today»)."),
+      }[field.key];
+      return help ?? t(`Choose the «${this.gridTerms(field)[0]}» sensor of inverter #${field.index + 1}.`, `Оберіть сенсор «${this.gridTerms(field)[0]}» інвертора #${field.index + 1}.`);
+    }
+
+    gridListHtml(name) {
+      const t = this.t.bind(this);
+      const { list } = this.gridCandidates(name);
+      const current = this.config[name];
+      if (!list.length) return `<p class="v-empty">${escapeHtml(t("Nothing found. Try another word or open the tip.", "Нічого не знайдено. Спробуйте інше слово або відкрийте пораду."))}</p>`;
+      const best = !current && list[0].name >= 2 && list[0].unitOk && !(list[1] && list[1].score === list[0].score) ? list[0].entity.entity_id : "";
+      const row = ({ entity }) => `<button type="button" class="v-pick${entity.entity_id === current ? " current" : ""}${entity.entity_id === best ? " best" : ""}" data-gpick="${escapeHtml(entity.entity_id)}">
+        <span><b>${escapeHtml(entity.attributes?.friendly_name ?? entity.entity_id)}</b><small>${escapeHtml(entity.entity_id)}</small>${entity.entity_id === best ? `<small class="v-best">${escapeHtml(t("Best match", "Найкраще збігається"))}</small>` : ""}</span>
+        <em>${escapeHtml(`${String(entity.state).slice(0, 14)}${entity.attributes?.unit_of_measurement ? " " + entity.attributes.unit_of_measurement : ""}`)}</em></button>`;
+      const similar = list.filter(item => item.name >= 1.5 && item.unitOk).slice(0, 6);
+      const rest = list.filter(item => !similar.includes(item)).slice(0, 40);
+      const hidden = list.length - similar.length - rest.length;
+      return `${similar.length ? `<h4>${t("SIMILAR BY NAME", "СХОЖІ ЗА НАЗВОЮ")}</h4>${similar.map(row).join("")}` : ""}
+        ${rest.length ? `<h4>${similar.length ? t("OTHER ENTITIES", "ІНШІ СУТНОСТІ") : t("ENTITIES", "СУТНОСТІ")}</h4>${rest.map(row).join("")}` : ""}
+        ${hidden > 0 ? `<p class="v-empty">${escapeHtml(t(`${hidden} more — refine the search.`, `Ще ${hidden} — уточніть пошук.`))}</p>` : ""}`;
+    }
+
+    gridSheetHtml(name, order) {
+      const t = this.t.bind(this);
+      const field = this.gridField(name);
+      if (!field) return "";
+      const config = this.modeConfig();
+      const source = this.gridSource;
+      const layout = gridLayouts[source];
+      const parallel = gridInverters(config, source).length > 1;
+      const title = field.column ? `${local(field.tile.label, this.config)} ${gridColumnTitle(source, field.column)}` : local(field.tile.label, this.config);
+      const current = this.config[name];
+      const entity = current ? this.screenStates()[current] : null;
+      const step = field.step ? t(`Step ${field.step} of ${layout.tiles.length}`, `Крок ${field.step} з ${layout.tiles.length}`)
+        + (field.step === 1 ? t(" — after it the gauge already works", " — після неї шкала вже працює") : "") : t("Individual reading", "Окремий показ");
+      return `<section class="v-sheet" style="grid-column:1/-1;${order ? `order:${order};` : ""}" aria-label="${escapeHtml(t("Choose an entity", "Вибір сутності"))}">
+        <div class="v-sheet-head"><div><h3>${escapeHtml(`${local(gridShortNames[source], this.config)} · ${title}${parallel ? ` · #${field.index + 1}` : ""}`)}</h3>
+          <small class="v-step">${escapeHtml(step)}</small></div>
+          <button type="button" class="v-help-btn" data-ghelp aria-pressed="${Boolean(this.gridHelpOpen)}"><span aria-hidden="true">?</span>${escapeHtml(this.gridHelpOpen ? t("Hide", "Сховати") : t("Tip", "Порада"))}</button></div>
+        ${this.gridHelpOpen ? `<div class="v-help"><p>${escapeHtml(this.gridHelp(field))}</p>
+          <h4>${t("NO MATCH? SEARCH FOR", "ЯКЩО НЕМАЄ ЗБІГУ — ШУКАЙТЕ")}</h4><div class="v-terms">${this.gridTerms(field).map(term => `<button type="button" data-gterm="${escapeHtml(term)}">${escapeHtml(term)}</button>`).join("")}</div>
+          <p class="v-tip">${escapeHtml(t("Not in the list? Settings → Devices & services → Entities: search for it and check that it is not disabled.", "Немає у списку? Налаштування → Пристрої та служби → Сутності: знайдіть пошуком і перевірте, чи вона не вимкнена."))}</p></div>` : ""}
+        ${current ? `<div class="v-current"><span><b>${escapeHtml(entity?.attributes?.friendly_name ?? current)}</b><small>${escapeHtml(current)}${entity ? "" : ` · ${t("not found in Home Assistant", "не знайдено в Home Assistant")}`}</small></span>
+          <button type="button" data-gclear>${t("Clear", "Прибрати")}</button></div>` : ""}
+        <input type="search" data-gsearch value="${escapeHtml(this.gridSearch ?? "")}" placeholder="${escapeHtml(t("Search entity…", "Пошук сутності…"))}" aria-label="${escapeHtml(t("Search entity", "Пошук сутності"))}">
+        <div class="v-list">${this.gridListHtml(name)}</div>
+        <div class="actions v-nav2"><button type="button" data-gclose>${t("Close", "Закрити")}</button><button type="button" data-gnext>${t("Next empty ›", "Наступне порожнє ›")}</button></div>
+      </section>`;
+    }
+
+    runtimeSheetHtml() {
+      const t = this.t.bind(this);
+      const states = this.screenStates();
+      const sensorId = this.config.battery_capacity_sensor;
+      const sensor = sensorId ? states[sensorId] : null;
+      const energy = ["kwh", "wh", "mwh", "квт·год"];
+      const sensors = Object.values(states).filter(entity => entity.entity_id.startsWith("sensor.")
+        && energy.includes(String(entity.attributes?.unit_of_measurement ?? "").trim().toLowerCase()))
+        .map(entity => ({ entity, score:visualScore(["battery capacity"], entity) }))
+        .sort((a, b) => b.score - a.score).slice(0, 8);
+      const value = (key) => this.config[key] === undefined || this.config[key] === null ? "" : escapeHtml(String(this.config[key]));
+      return `<section class="v-sheet" style="grid-column:1/-1;order:1" aria-label="${escapeHtml(t("Estimated time", "Розрахунковий час"))}">
+        <div class="v-sheet-head"><div><h3>${escapeHtml(t("Battery · Estimated time", "Батарея · Розрахунковий час"))}</h3><small class="v-step">${escapeHtml(t("Needs Power and Charge + capacity", "Потрібні Потужність і Заряд + ємність"))}</small></div>
+          <button type="button" class="v-help-btn" data-ghelp aria-pressed="${Boolean(this.gridHelpOpen)}"><span aria-hidden="true">?</span>${escapeHtml(this.gridHelpOpen ? t("Hide", "Сховати") : t("Tip", "Порада"))}</button></div>
+        ${this.gridHelpOpen ? `<div class="v-help"><p>${escapeHtml(t("Capacity is taken in this order: the number you type → separate bank capacities → a capacity sensor (kWh) → Ah × battery voltage. Check that the sensor shows the full capacity, not the remaining energy. Threshold: if empty — the inverter «Shutdown» setting, otherwise 20 %.",
+          "Ємність береться так: число, яке ви вписали → ємності окремих АКБ → сенсор ємності (кВт·год) → А·год × напруга АКБ. Перевірте, що сенсор показує повну ємність, а не залишок. Поріг: якщо порожньо — «Поріг вимкнення» інвертора, інакше 20 %."))}</p></div>` : ""}
+        <label class="v-field"><span>${escapeHtml(t("Battery capacity, kWh", "Ємність АКБ, кВт·год"))}</span><input type="number" step="0.1" min="0" inputmode="decimal" placeholder="${escapeHtml(t("e.g. 30.7", "напр. 30,7"))}" value="${value("battery_runtime_capacity_kwh")}" data-grt="battery_runtime_capacity_kwh"></label>
+        <label class="v-field"><span>${escapeHtml(t("Count discharge down to, %", "Рахувати розряд до, %"))}</span><input type="number" step="1" min="0" max="90" inputmode="numeric" placeholder="20" value="${value("battery_runtime_cutoff")}" data-grt="battery_runtime_cutoff"></label>
+        <div class="v-field"><span>${escapeHtml(t("or a capacity sensor (kWh)", "або сенсор ємності (кВт·год)"))}</span></div>
+        ${sensorId ? `<div class="v-current"><span><b>${escapeHtml(sensor?.attributes?.friendly_name ?? sensorId)}</b><small>${escapeHtml(sensorId)}</small></span><button type="button" data-grtclear>${t("Clear", "Прибрати")}</button></div>` : ""}
+        <div class="v-list">${sensors.map(({ entity, score }, k) => `<button type="button" class="v-pick${entity.entity_id === sensorId ? " current" : ""}${!sensorId && !k && score >= 2 ? " best" : ""}" data-grtpick="${escapeHtml(entity.entity_id)}">
+          <span><b>${escapeHtml(entity.attributes?.friendly_name ?? entity.entity_id)}</b><small>${escapeHtml(entity.entity_id)}</small>${!sensorId && !k && score >= 2 ? `<small class="v-best">${escapeHtml(t("Best match", "Найкраще збігається"))}</small>` : ""}</span>
+          <em>${escapeHtml(`${entity.state} ${entity.attributes?.unit_of_measurement ?? ""}`)}</em></button>`).join("") || `<p class="v-empty">${escapeHtml(t("No energy sensors (kWh) in Home Assistant.", "У Home Assistant немає сенсорів енергії (кВт·год)."))}</p>`}</div>
+        <div class="actions v-nav2"><button type="button" data-gclose>${t("Close", "Закрити")}</button><button type="button" data-gnext>${t("Next empty ›", "Наступне порожнє ›")}</button></div>
+      </section>`;
+    }
+
+    gridNextEmpty(config, after) {
+      const order = gridOrder(config, this.gridSource, this.gridPage === "sub" ? "sub" : "main");
+      const start = after ? order.indexOf(after) : -1;
+      return order.slice(start + 1).find(name => gridSlotNeeded(config, this.screenStates(), this.gridSource, name, this.gridPage)) ?? "";
+    }
+
+    screenAction(args) {
+      if (this.tab !== "screen" || this.screenView === "list") return false;
+      const keys = ["gsource", "gback", "gslot", "gact", "gpick", "ghelp", "gterm", "gclear", "gclose", "gnext", "grtpick", "grtclear"];
+      if (!keys.some(key => args[key] !== undefined)) return false;
+      const t = this.t.bind(this);
+      const config = this.modeConfig();
+      const rerender = (scroll = false) => { this.gridScroll = scroll; this.renderScreen(); };
+      if (args.gsource !== undefined) {
+        this.gridSource = args.gsource;
+        this.gridPage = "main";
+        this.gridSearch = "";
+        this.gridHelpOpen = false;
+        this.gridSel = this.gridNextEmpty(config);
+        rerender(true);
+        this.layout.querySelector(".g-ed")?.scrollIntoView({ block:"nearest" });
+      } else if (args.gback !== undefined) {
+        if (this.gridPage !== "main") { this.gridPage = "main"; this.gridSel = ""; rerender(); }
+        else {
+          const source = this.gridSource;
+          this.gridSource = ""; this.gridSel = "";
+          rerender();
+          this.layout.querySelector(`[data-gsource="${source}"]`)?.focus({ preventScroll:true });
+        }
+      } else if (args.gslot !== undefined) {
+        this.gridSel = this.gridSel === args.gslot ? "" : args.gslot;
+        this.gridSearch = ""; this.gridHelpOpen = false;
+        rerender(true);
+      } else if (args.gact !== undefined) {
+        const index = Number(args.gi ?? 0);
+        if (args.gact === "sub" || args.gact === "chart") {
+          this.gridPage = args.gact;
+          this.gridSel = args.gact === "sub" ? this.gridNextEmpty(config) : "";
+          rerender(true);
+        } else if (args.gact === "pvadd") {
+          const count = pvInputCount(config, index);
+          if (count >= 6) return true;
+          this.gridSel = inverterField(index, `pv_${count + 1}_voltage`);
+          this.gridScroll = true;
+          this.commit({ ...this.config, [inverterField(index, "pv_inputs")]:count + 1 });
+        } else if (args.gact === "pvdel") {
+          const count = pvInputCount(config, index);
+          if (count <= 1) return true;
+          const next = { ...this.config };
+          for (const { k } of gridSubMetrics) delete next[inverterField(index, `pv_${count}_${k}`)];
+          if (count - 1 > 1) next[inverterField(index, "pv_inputs")] = count - 1; else delete next[inverterField(index, "pv_inputs")];
+          this.gridSel = "";
+          this.commit(next);
+        }
+      } else if (args.gpick !== undefined) {
+        const name = this.gridSel;
+        if (!name) return true;
+        const next = { ...this.config, [name]:args.gpick };
+        this.gridSel = this.gridNextEmpty({ ...DeyeLcd.getStubConfig(), ...next }, name);
+        this.gridSearch = ""; this.gridHelpOpen = false; this.gridScroll = Boolean(this.gridSel);
+        this.notice.textContent = t(`Linked: ${args.gpick}`, `Прив’язано: ${args.gpick}`);
+        this.commit(next);
+      } else if (args.grtpick !== undefined) {
+        const next = { ...this.config, battery_capacity_sensor:args.grtpick };
+        this.gridSel = this.gridNextEmpty({ ...DeyeLcd.getStubConfig(), ...next }, "__runtime");
+        this.gridScroll = Boolean(this.gridSel);
+        this.commit(next);
+      } else if (args.grtclear !== undefined) {
+        const next = { ...this.config };
+        delete next.battery_capacity_sensor;
+        this.commit(next);
+      } else if (args.ghelp !== undefined) {
+        this.gridHelpOpen = !this.gridHelpOpen;
+        rerender();
+        this.layout.querySelector("[data-ghelp]")?.focus({ preventScroll:true });
+      } else if (args.gterm !== undefined) {
+        this.gridSearch = args.gterm;
+        rerender();
+      } else if (args.gclear !== undefined) {
+        const next = { ...this.config };
+        delete next[this.gridSel];
+        this.notice.textContent = t("Link removed.", "Прив’язку прибрано.");
+        this.commit(next);
+      } else if (args.gclose !== undefined) {
+        const name = this.gridSel;
+        this.gridSel = "";
+        rerender();
+        this.layout.querySelector(`[data-gslot="${CSS.escape(name)}"]`)?.focus({ preventScroll:true });
+      } else if (args.gnext !== undefined) {
+        this.gridSel = this.gridNextEmpty(config, this.gridSel) || this.gridNextEmpty(config);
+        this.gridSearch = ""; this.gridHelpOpen = false;
+        rerender(true);
+      }
+      return true;
+    }
+
+    screenInput(event) {
+      const input = event.target.closest?.("[data-gsearch]");
+      if (!input) return false;
+      this.gridSearch = input.value;
+      const list = this.layout.querySelector(".g-ed .v-list");
+      if (list && this.gridSel) list.innerHTML = this.gridListHtml(this.gridSel);
+      return true;
+    }
+
+    screenChange(event) {
+      const input = event.target.closest?.("[data-grt]");
+      if (!input) return;
+      const key = input.dataset.grt;
+      const next = { ...this.config };
+      const value = String(input.value).trim().replace(",", ".");
+      if (value === "" || !Number.isFinite(Number(value))) delete next[key];
+      else next[key] = Number(value);
+      this.commit(next);
     }
 
     visualDomains(name) {
@@ -3904,30 +4819,26 @@
       onActivate(this.generatorGroup, () => this.openDetails("generator_power"));
       this.detailsScreen = select(".details-screen");
       this.detailsTitle = select("#details-title");
-      this.detailsReadings = select(".details-readings");
-      this.runtimeBox = select("[data-runtime]");
-      this.runtimeLabel = select("[data-runtime-label]");
-      this.runtimeValue = select("[data-runtime-value]");
-      this.runtimeNote = select("[data-runtime-note]");
+      this.detailsBody = select("[data-details-body]");
+      this.detailsBody.addEventListener("click", event => {
+        const button = event.target.closest("[data-gact]");
+        if (!button || !this.detailsKey) return;
+        const page = button.dataset.gact === "sub" ? "sub" : button.dataset.gact === "chart" ? "chart" : null;
+        if (!page) return;
+        this.detailsPage = page;
+        this.updateDetails();
+        if (page === "chart" && this.detailsData) this.renderDetailsHistory();
+        this.detailsTitle.focus({ preventScroll: true });
+      });
+      this.historySection = select(".details-history");
       this.historyHeading = select("#details-history-title");
       this.historyToggle = select("[data-history-toggle]");
-      this.historyToggle.addEventListener("click", () => this.setDetailsSplit(true));
+      this.historyToggle.addEventListener("click", () => this.setDetailsSplit(!this.detailsSplit));
       this.historyMessage = select(".history-message");
       this.historyChart = select(".history-chart");
       this.detailsKey = null;
+      this.detailsPage = "main";
       this.historyRequest = 0;
-      this.detailMetrics = measurementFields.map(field =>
-        measurementNodes(select(`[data-metric="${field.key}"]`), field)
-      );
-      const inverterPhases = inverterColumns.map(({ prefix }) => ({ key: prefix, columns: phaseColumns, fields: acMeasurements }));
-      this.detailBreakdowns = [...detailBreakdowns, ...inverterPhases].map(({ key, columns, fields }) => {
-        const panel = select(`[data-breakdown="${key}"]`);
-        const cells = columns.flatMap(({ prefix }) => fields.map(field => {
-          const row = panel.querySelector(`[data-reading="${prefix}_${field.key}"]`);
-          return { ...measurementNodes(row, field), prefix };
-        }));
-        return { key, panel, cells };
-      });
       select(".details-back").addEventListener("click", () => this.backFromDetails());
       this.detailsScreen.addEventListener("keydown", (event) => {
         if (event.key !== "Escape") return;
@@ -4225,7 +5136,11 @@
     getCardSize() { return 5; }
     getGridOptions() { return { columns: 12, min_columns: 6 }; }
 
-    visualConfig() { return { ...DeyeLcd.getStubConfig(), ...this.config, ...this.visualPreferences }; }
+    visualConfig() {
+      const base = { ...DeyeLcd.getStubConfig(), ...this.config, ...this.visualPreferences };
+      // The editor preview always shows КЛАСіК, light or black after Home Assistant.
+      return this.editorPreview ? { ...base, lcd_theme:"classic", lcd_appearance:"auto", lcd_auto_source:"ha" } : base;
+    }
 
     visualKey(identity) {
       let hash = 2166136261;
@@ -4266,6 +5181,7 @@
     }
 
     checkForUpdate() {
+      if (this.editorPreview) return;
       let cached = null;
       try { cached = JSON.parse(localStorage.getItem(releaseKey) || "null"); } catch { cached = null; }
       if (cached && Date.now() - cached.at < releaseInterval) {
@@ -4436,6 +5352,8 @@
       const gauge = gaugeByKey[key];
       if (!gauge) return;
       this.detailsKey = key;
+      this.detailsPage = "main";
+      this.detailsHtml = "";
       this.detailsSplit = false;
       this.detailsData = null;
       this.detailsScreen.dataset.source = gauge.source;
@@ -4447,9 +5365,10 @@
     }
 
     backFromDetails() {
-      if (this.detailsSplit) {
-        this.setDetailsSplit(false);
-        this.historyToggle.focus({ preventScroll: true });
+      if (this.detailsPage && this.detailsPage !== "main") {
+        this.detailsPage = "main";
+        this.updateDetails();
+        this.detailsTitle.focus({ preventScroll: true });
       } else this.closeDetails();
     }
 
@@ -4469,169 +5388,38 @@
       this.detailsSplit = split;
       this.updateDetails();
       if (this.detailsData) this.renderDetailsHistory();
-      if (split) this.detailsTitle.focus({ preventScroll: true });
     }
 
-    renderMetric(metric, ids, gauge, states) {
-      if (ids.length === 1 && !ids[0].parts) {
-        const { id, invert } = ids[0];
-        renderMeasurement(metric, id, states, invert, preferEnglish(this.config));
-        if (gauge.source === "battery" && metric.key === "power" && this.config.battery_power_x2 === true) {
-          const wattsValue = signed(watts(states[id]), invert);
-          metric.value.textContent = wattsValue === null ? "—" : (preferEnglish(this.config) ? englishMeasurementFormat : measurementFormat).format(wattsValue * 2 / 1000);
-        }
-        return;
-      }
-      const isPower = metric.key === "power";
-      if (["temperature", "voltage"].includes(metric.key) && ids.length > 1) {
-        // Parallel banks: the hottest battery is what matters for temperature; voltage is the average.
-        const values = ids.map(({ id }) => reading(states[id])).filter(Number.isFinite);
-        const value = !values.length ? null : metric.key === "temperature" ? Math.max(...values) : values.reduce((a, b) => a + b, 0) / values.length;
-        const english = preferEnglish(this.config);
-        metric.value.textContent = value === null ? "—" : (english ? englishMeasurementFormat : measurementFormat).format(Math.round(value * 10) / 10);
-        metric.unitText.textContent = value === null ? "" : metric.key === "temperature" ? "°C" : this.t("V", "В");
-        metric.row.title = value === null ? this.t("Open the individual readings when a combined value is unavailable.", "Окремі покази доступні в таблиці нижче.")
-          : metric.key === "temperature" ? this.t("Highest of the batteries", "Найвища з АКБ") : this.t("Average of the batteries", "Середня по АКБ");
-        return;
-      }
-      const total = isPower ? powerTotal(ids, states, gauge.source === "pv")
-        : metric.key === "current" && (acSources.includes(gauge.source) || gauge.source === "generator" || gauge.source === "battery" && this.config.battery_power_mode === "channels") ? currentTotal(ids.map(({ id }) => id), states)
-          : null;
-      const english = preferEnglish(this.config);
-      metric.value.textContent = total === null ? "—" : (english ? englishMeasurementFormat : measurementFormat).format(isPower ? total / 1000 * (gauge.source === "battery" && this.config.battery_power_x2 === true ? 2 : 1) : total);
-      metric.unitText.textContent = total === null ? "" : isPower ? this.t("kW", "кВт") : this.t("A", "А");
-      metric.row.title = total === null
-        ? this.t("Open the individual readings when a combined value is unavailable.", "Окремі покази доступні в таблиці нижче.") : "";
-    }
+    batteryCapacity(states) { return batteryCapacityOf(this.config, states); }
 
-    batteryCapacity(states) {
-      // Order: the value typed in the editor, separate banks, a kWh sensor, then Ah × battery voltage.
-      const manual = Number(this.config.battery_runtime_capacity_kwh);
-      if (Number.isFinite(manual) && manual > 0) return { kwh:manual, source:"manual" };
-      if (batterySeparate(this.config) && this.inverterCount > 1) {
-        const banks = installedInverters(this.config).map(index => Number(this.config[inverterField(index, "battery_soc_capacity_kwh")]));
-        if (banks.every(value => Number.isFinite(value) && value > 0)) return { kwh:banks.reduce((a, b) => a + b, 0), source:"banks" };
-      }
-      const sensor = states[this.config.battery_capacity_sensor];
-      const amount = reading(sensor);
-      if (amount !== null && amount > 0) {
-        const unit = String(sensor.attributes?.unit_of_measurement ?? "kWh").trim().toLowerCase();
-        const factor = { kwh:1, "квт·год":1, wh:0.001, "вт·год":0.001, mwh:1000 }[unit];
-        if (factor) return { kwh:amount * factor, source:"sensor" };
-      }
-      const ah = reading(states[this.config.battery_capacity]);
-      const volts = reading(states[this.config.battery_voltage]);
-      if (ah !== null && ah > 0 && volts !== null && volts > 0) return { kwh:ah * volts / 1000, source:"ah" };
-      return null;
-    }
-
-    runtimeCutoff(states) {
-      const custom = this.config.battery_runtime_cutoff;
-      if (custom !== undefined && custom !== null && custom !== "" && Number.isFinite(Number(custom))) return Math.min(95, Math.max(0, Number(custom)));
-      const shutdown = states[this.config.battery_shutdown];
-      const unit = String(shutdown?.attributes?.unit_of_measurement ?? "").trim();
-      const value = reading(shutdown);
-      return unit === "%" && value !== null && value >= 0 && value < 100 ? value : 20;
-    }
-
-    formatDuration(minutes) {
-      if (minutes >= 48 * 60) return this.t("over 2 days", "понад 2 доби");
-      const hours = Math.floor(minutes / 60), rest = Math.round(minutes % 60);
-      const h = hours + (rest === 60 ? 1 : 0), m = rest === 60 ? 0 : rest;
-      if (!h) return this.t(`${m} min`, `${m} хв`);
-      return m ? this.t(`${h} h ${m} min`, `${h} год ${m} хв`) : this.t(`${h} h`, `${h} год`);
-    }
-
-    renderRuntime(states) {
-      const raw = powerTotal(powerSources(this.config, gaugeByKey.battery_power), states);
-      const power = raw === null ? null : raw * (this.config.battery_power_x2 === true ? 2 : 1);
-      const soc = this.runtimeSoc ?? null;
-      const capacity = this.batteryCapacity(states);
-      const cutoff = this.runtimeCutoff(states);
-      const english = preferEnglish(this.config);
-      const number = value => (english ? englishMeasurementFormat : measurementFormat).format(Math.round(value * 10) / 10);
-      const charging = power !== null && power < 0;
-      this.runtimeLabel.textContent = charging ? this.t("Time to full charge", "До повного заряду") : this.t("Battery runtime", "Час роботи від АКБ");
-      let value = "—", note;
-      if (!capacity) note = this.t("Set the battery capacity in the card editor (General).", "Вкажіть ємність АКБ у редакторі картки (вкладка «Загальне»).");
-      else if (power === null || soc === null) note = this.t("Battery power or charge is unavailable.", "Немає даних про потужність або заряд АКБ.");
-      else if (Math.abs(power) < 50) note = this.t("The battery is idle.", "АКБ у спокої.");
-      else if (charging) {
-        value = soc >= 100 ? this.t("Full", "Заряджено") : this.formatDuration(capacity.kwh * (100 - soc) / 100 / (-power / 1000) * 60);
-        note = this.t(`to 100 % · ${number(capacity.kwh)} kWh · at the current power`, `до 100 % · ${number(capacity.kwh)} кВт·год · за поточною потужністю`);
-      } else {
-        value = soc <= cutoff ? this.t("Threshold reached", "Поріг досягнуто") : this.formatDuration(capacity.kwh * (soc - cutoff) / 100 / (power / 1000) * 60);
-        note = this.t(`down to ${number(cutoff)} % · ${number(capacity.kwh)} kWh · at the current power`, `до ${number(cutoff)} % · ${number(capacity.kwh)} кВт·год · за поточною потужністю`);
-      }
-      this.runtimeValue.textContent = value;
-      this.runtimeNote.textContent = note;
-      this.runtimeBox.toggleAttribute("data-charging", charging && value !== "—");
-    }
+    runtimeCutoff(states) { return runtimeCutoffOf(this.config, states); }
 
     updateDetails() {
       const gauge = gaugeByKey[this.detailsKey];
+      if (!gauge) return;
       const states = this.hassData?.states ?? {};
-      const { source, invert } = gauge;
-      const isBattery = source === "battery";
-      const sources = powerSources(this.config, gauge);
-      const count = sources.length;
+      const source = gauge.source;
+      const layout = gridLayouts[source];
+      const page = this.detailsPage ?? "main";
+      const count = powerSources(this.config, gauge).length;
       const english = preferEnglish(this.config);
-      const phaseView = acSources.includes(source) && threePhaseValues.includes(this.config.inverter_phases);
-      const sourceTitle = this.t(gauge.english, gauge.label);
-      this.detailsTitle.textContent = this.detailsSplit ? `${sourceTitle} · ${this.t("Individual", "Окремо")}` : sourceTitle;
+      const title = this.t(gauge.english, gauge.label);
+      const suffix = page === "sub" ? (source === "pv" ? this.t("by input", "по входах") : this.t("by phase", "по фазах"))
+        : page === "chart" ? this.t("graph", "графік") : "";
+      this.detailsTitle.textContent = suffix ? `${title} · ${suffix}` : title;
+      this.detailsScreen.dataset.page = page;
+      this.historySection.hidden = !(page === "chart" || page === "main" && !layout.chartPage);
       const canSplit = count > 1;
-      this.historyToggle.hidden = !canSplit || this.detailsSplit;
-      this.detailsReadings.hidden = this.detailsSplit;
-      this.runtimeBox.hidden = !isBattery || this.detailsSplit;
-      if (!this.runtimeBox.hidden) this.renderRuntime(states);
-      this.historyHeading.textContent = this.detailsSplit ? this.t("Power by inverter · 24 h", "Потужність по інверторах · 24 год")
-        : canSplit ? this.t("Combined power · 24 h", "Загальна потужність · 24 год") : this.t("Power over 24 h", "Потужність за 24 год");
-      const idsFor = (metric, phase = "") => metric === "power" && !phase ? sources
-        : sources.flatMap(({ index, invert, parts }) => parts && metric === "current" ? [1,2].map(channel => ({
-          id:this.config[inverterField(index, `battery_${channel}_current`)], invert,
-        })) : [{ id:this.config[inverterField(index, `${source}_${phase ? phase + "_" : ""}${metric}`)], invert }]);
-      for (const metric of this.detailMetrics) {
-        metric.row.hidden = metric.key === "temperature" && !isBattery;
-        if (!metric.row.hidden) this.renderMetric(metric, idsFor(metric.key), gauge, states);
-      }
-      for (const { key, panel, cells } of this.detailBreakdowns) {
-        if (/^inv\d$/.test(key)) {
-          const index = Number(key.at(-1));
-          panel.hidden = !this.detailsSplit || !phaseView || index >= count;
-          if (!panel.hidden) for (const cell of cells) {
-            const field = inverterField(index, `${source}_${cell.prefix}_${cell.key}`);
-            renderMeasurement(cell, this.config[field], states, sources[index].invert, english);
-          }
-          continue;
-        }
-        panel.hidden = this.detailsSplit || (key === "phases" ? !phaseView
-          : key === "batteries" ? !isBattery || this.inverterCount !== 1 || this.screen.dataset.battery !== "dual"
-            : count < 2);
-        if (panel.hidden) continue;
-        for (const cell of cells) {
-          if (key === "phases") {
-            this.renderMetric(cell, idsFor(cell.key, cell.prefix), gauge, states);
-            continue;
-          }
-          let field;
-          let reverse = invert && this.config[invert];
-          if (key === "inverters") {
-            const index = Number(cell.prefix.at(-1));
-            if (index >= count) continue;
-            field = inverterField(index, `${source}_${cell.key}`);
-            reverse = sources[index].invert;
-          } else {
-            field = `${cell.prefix}_${cell.key}`;
-          }
-          if (key === "inverters" && cell.key === "power") this.renderMetric(cell, [sources[Number(cell.prefix.at(-1))]], gauge, states);
-          else renderMeasurement(cell, this.config[field], states, reverse, english);
-        }
-        if (key !== "inverters") continue;
-        for (const column of panel.querySelectorAll("[data-inv-column]")) column.hidden = Number(column.dataset.invColumn) >= count;
-        for (const row of panel.querySelectorAll("[data-detail-row]")) {
-          row.hidden = !isBattery && ["temperature", "soc"].includes(row.dataset.detailRow);
-        }
-      }
+      this.historyToggle.hidden = !canSplit;
+      this.historyToggle.setAttribute("aria-pressed", String(Boolean(this.detailsSplit)));
+      this.historyHeading.textContent = this.detailsSplit && canSplit ? this.t("Power by inverter · 24 h", "Потужність по інверторах · 24 год")
+        : canSplit ? this.t("Combined power · 24 h", "Загальна потужність · 24 год") : this.t("Power · 24 h", "Потужність · 24 год");
+      const html = page === "chart" ? "" : gridBodyHtml({
+        config:this.config, states, source, page, edit:false, t:this.t.bind(this), english, soc:this.runtimeSoc ?? null,
+        dual:source === "battery" && this.inverterCount === 1 && this.screen.dataset.battery === "dual",
+      });
+      this.detailsBody.hidden = page === "chart";
+      if (html !== this.detailsHtml) { this.detailsHtml = html; this.detailsBody.innerHTML = html; }
     }
 
     showHistory(message, plot = "") {
@@ -5646,8 +6434,9 @@
       this.screen.dataset.batteryFlow = direction(battery, "charge", "discharge");
       this.screen.dataset.gridFlow = gridDisconnected ? "idle" : direction(grid, "export", "import");
       const genActive = generatorActive(this.config, states);
-      this.generatorGroup.toggleAttribute("hidden", !genActive);
-      this.generatorPower.textContent = genActive ? formatPower(total("generator_power")) : "—";
+      // The editor preview always shows the generator, so it can be set up before it ever runs.
+      this.generatorGroup.toggleAttribute("hidden", !genActive && !this.editorPreview);
+      this.generatorPower.textContent = genActive || this.editorPreview ? formatPower(total("generator_power")) : "—";
       this.updateStatus(states, [grid, load, battery]);
       if (this.detailsKey) this.updateDetails();
       if (!this.settingsScreen.hidden) this.renderSettings();
