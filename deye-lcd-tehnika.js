@@ -9,7 +9,7 @@
   const legacyCardTag = "deye-lcd-8k";
   if (customElements.get(cardTag)) return;
 
-  const version = "Alpha 0.8.23";
+  const version = "Alpha 0.8.24";
   const models = [3, 5, 6, 8, 10, 12, 15, 20, 30, 80, 160];
   const defaultModel = 8;
   const themes = [
@@ -18,7 +18,7 @@
   ];
   const manualAppearances = ["light", "dark"];
   const visualValues = { lcd_theme:["classic","technika"], lcd_palette:["olive","graphite"],
-    lcd_appearance:["light","dark","auto"], lcd_auto_source:["ha","sun","device"], lcd_particles:["dot","glow","packet"] };
+    lcd_appearance:["light","dark","auto"], lcd_auto_source:["ha","sun","device"], lcd_particles:["dot","glow","packet"], language:["uk","en"] };
   const threePhaseValues = ["3", 3];
   const acSources = ["grid", "load"];
   const screenWhite = "#ffffff";
@@ -2010,6 +2010,26 @@
       min-height:36px; padding:6px 8px; border:0; background:transparent; color:var(--ap-ink); font:inherit; font-size:13px;
       text-decoration:underline; text-underline-offset:3px; cursor:pointer;
     }
+    .ap-look { display:grid; grid-template-columns:2fr 1fr 1fr; position:relative; }
+    .ap-look button[data-visual-value="auto"] { flex-direction:column; gap:3px; }
+    .ap-auto { display:flex; align-items:center; gap:5px; line-height:1; }
+    .ap-dots { display:flex; gap:4px; }
+    .ap-dots i { width:5px; height:5px; border-radius:50%; background:currentColor; opacity:.3; }
+    .ap-dots i[data-current] { opacity:1; }
+    .ap-look button[data-visual-value="auto"][aria-pressed="false"] .ap-dots { display:none; }
+    .ap-hint {
+      position:absolute; left:3px; top:calc(100% + 5px); width:calc(50% - 4px); z-index:2; padding:4px 6px; border-radius:8px;
+      border:1px solid var(--ap-active); background:var(--ap-bg); color:var(--ap-ink); font-size:12px; text-align:center; white-space:nowrap;
+      opacity:0; transform:translateY(-3px); transition:opacity .35s, transform .35s; pointer-events:none;
+    }
+    .ap-hint[data-show] { opacity:1; transform:none; }
+    .ap-flags { display:flex; gap:4px; }
+    .ap-footer .ap-flag {
+      display:grid; place-items:center; width:30px; height:24px; min-height:0; padding:0; border:1.5px solid transparent; border-radius:6px;
+      background:transparent; opacity:.55; text-decoration:none;
+    }
+    .ap-footer .ap-flag[aria-pressed="true"] { border-color:var(--ap-active); opacity:1; }
+    .ap-flag svg { display:block; width:20px; height:14px; border-radius:2px; }
     .appearance-dialog button:focus-visible { outline:2px solid var(--ap-active); outline-offset:2px; }
     :host([data-theme="technika"]) .appearance-dialog { --ap-bg:#e7ebdf; --ap-field:#dce3d0; --ap-active:#566b39; }
     :host([data-appearance="dark"]) .appearance-dialog { color-scheme:dark; --ap-bg:#24292b; --ap-ink:#e4e9e7; --ap-muted:#b4c0ba; --ap-field:#333c38; --ap-edge:#64746b; --ap-active:#a8c18f; --ap-on:#182114; }
@@ -3533,7 +3553,7 @@
   class DeyeLcd extends HTMLElement {
     static getStubConfig() {
       return {
-        language: "uk", lcd_theme: "classic", lcd_palette: "olive", lcd_appearance: "auto", lcd_auto_source: "ha",
+        language: "uk", lcd_theme: "classic", lcd_palette: "olive", lcd_appearance: "auto", lcd_auto_source: "ha", lcd_particles: "dot",
         inverter_model: String(defaultModel), inverter_phases: "1", inverter_count: "1", battery_topology: "shared",
         battery_power_mode: "legacy", battery_power_x2: false, generator_power_mode: "total",
       };
@@ -3623,7 +3643,8 @@
       });
       this.appearanceDialog.addEventListener("click", event => {
         const button = event.target.closest("button");
-        if (button?.dataset.visualKey) this.setVisualPreference(button.dataset.visualKey, button.dataset.visualValue);
+        if (button?.dataset.visualKey === "lcd_appearance" && button.dataset.visualValue === "auto") this.cycleAutoAppearance();
+        else if (button?.dataset.visualKey) this.setVisualPreference(button.dataset.visualKey, button.dataset.visualValue);
         else if (button?.dataset.visualReset !== undefined) this.resetVisualPreferences();
       });
       // Compact panel: a tap anywhere outside it (or on the «Т» button again) closes it.
@@ -3809,7 +3830,8 @@
       }));
     }
 
-    setConfig(config) {
+    setConfig(config, preferred = false) {
+      if (!preferred) this.sourceConfig = config;
       const bindingsChanged = settingFields.some(([name]) => this.config?.[name] !== config[name]);
       const gauge = gaugeByKey[this.detailsKey];
       const historyChanged = gauge && (JSON.stringify(powerSources(this.config, gauge)) !== JSON.stringify(powerSources(config, gauge)) || (gauge.source === "battery" && this.config?.battery_power_x2 !== config.battery_power_x2));
@@ -3822,6 +3844,9 @@
         this.localize();
       }
       this.loadVisualPreferences();
+      // A language picked with the flags in the «Т» menu wins over the card setting, in this browser only.
+      const language = this.visualPreferences?.language;
+      if (language && language !== config.language) { this.setConfig({ ...config, language }, true); return; }
       const technika = this.visualConfig().lcd_theme === "technika";
       this.dataset.theme = technika ? "technika" : "classic";
       this.dataset.palette = this.visualConfig().lcd_palette === "graphite" ? "graphite" : "olive";
@@ -3981,19 +4006,34 @@
       this.saveVisualPreferences();
     }
 
+    cycleAutoAppearance() {
+      // First tap turns «Авто» on; each next tap moves to the next source: HA theme → sun → device.
+      const sources = visualValues.lcd_auto_source;
+      const config = this.visualConfig();
+      const next = config.lcd_appearance !== "auto" ? config.lcd_auto_source
+        : sources[(sources.indexOf(config.lcd_auto_source) + 1) % sources.length];
+      this.visualPreferences = { ...this.visualPreferences, lcd_appearance:"auto", lcd_auto_source:next };
+      this.saveVisualPreferences();
+      const hint = this.appearanceDialog.querySelector("[data-auto-hint]");
+      if (!hint) return;
+      clearTimeout(this.autoHintTimer);
+      requestAnimationFrame(() => hint.toggleAttribute("data-show", true));
+      this.autoHintTimer = setTimeout(() => hint.removeAttribute("data-show"), 1900);
+    }
+
     saveVisualPreferences() {
       let stored = true;
       try { localStorage.setItem(this.visualStorageKey, JSON.stringify(this.visualPreferences)); }
       catch { stored = false; }
       // Reuse setConfig so paths, icons, menus and graphs all get the same theme immediately.
-      this.setConfig(this.config);
+      this.setConfig(this.sourceConfig ?? this.config);
       const focused = this.shadowRoot.activeElement;
       const selector = focused?.dataset.visualKey ? `[data-visual-key="${focused.dataset.visualKey}"][data-visual-value="${focused.dataset.visualValue}"]`
         : "[data-visual-reset]";
       this.renderAppearance();
       this.appearanceDialog.querySelector(selector)?.focus({ preventScroll:true });
       const status = this.appearanceDialog.querySelector("[data-visual-status]");
-      status.textContent = stored ? this.t("Saved in this browser.", "Збережено в цьому браузері.")
+      if (status) status.textContent = stored ? this.t("Saved in this browser.", "Збережено в цьому браузері.")
         : this.t("Applied for this session. Browser storage is unavailable.", "Застосовано на цей сеанс. Сховище браузера недоступне.");
     }
 
@@ -4033,9 +4073,23 @@
       const technika = config.lcd_theme === "technika";
       const auto = !manualAppearances.includes(config.lcd_appearance);
       const palette = config.lcd_palette === "graphite" ? t("Graphite", "Графіт") : t("Olive", "Олива");
+      const sources = visualValues.lcd_auto_source;
+      const sourceName = { ha:t("by HA theme", "за темою HA"), sun:t("by the sun", "за сонцем"), device:t("by device", "за пристроєм") }[config.lcd_auto_source] ?? "";
+      const dots = `<span class="ap-dots" aria-hidden="true">${sources.map(source => `<i${source === config.lcd_auto_source ? " data-current" : ""}></i>`).join("")}</span>`;
+      const flag = (value, label, art) => `<button type="button" class="ap-flag" data-visual-key="language" data-visual-value="${value}" aria-pressed="${(config.language === "en" ? "en" : "uk") === value}" aria-label="${label}" title="${label}">${art}</button>`;
+      const ukraine = '<svg viewBox="0 0 3 2" aria-hidden="true"><rect width="3" height="1" fill="#0057b7"/><rect y="1" width="3" height="1" fill="#ffd700"/></svg>';
+      const britain = '<svg viewBox="0 0 60 30" aria-hidden="true"><path d="M0 0h60v30H0z" fill="#012169"/><path d="M0 0l60 30M60 0L0 30" stroke="#fff" stroke-width="6"/><path d="M0 0l60 30M60 0L0 30" stroke="#c8102e" stroke-width="2.4"/><path d="M30 0v30M0 15h60" stroke="#fff" stroke-width="10"/><path d="M30 0v30M0 15h60" stroke="#c8102e" stroke-width="6"/></svg>';
+      // Common options first; options that only the ТЕХНіКА theme has always go below them.
       this.appearanceDialog.innerHTML = `<h2 id="appearance-title" class="sr-only">${t("Card appearance", "Оформлення картки")}</h2>
         <div class="ap-grid">
           ${row("theme", t("Theme", "Тема"), button("lcd_theme", "classic", "КЛАСіК") + button("lcd_theme", "technika", "ТЕХНіКА"))}
+          <span class="ap-label" id="ap-mode">${t("Look", "Вигляд")}</span>
+          <div class="ap-seg ap-look" role="group" aria-labelledby="ap-mode">
+            ${button("lcd_appearance", "auto", `<span class="ap-auto">${icon.auto}<span>${t("Auto", "Авто")}</span></span>${dots}`, ` aria-label="${t("Auto", "Авто")} · ${sourceName}" title="${sourceName}"`)}
+            ${button("lcd_appearance", "light", icon.light, ` aria-label="${t("Light", "Світле")}"`)}
+            ${button("lcd_appearance", "dark", icon.dark, ` aria-label="${t("Dark", "Темне")}"`)}
+            <span class="ap-hint" data-auto-hint role="status">${auto ? sourceName : ""}</span>
+          </div>
           ${technika ? `<span class="ap-label" id="ap-palette">${t("Palette", "Палітра")}</span>
             <div class="ap-swatches" role="group" aria-labelledby="ap-palette">
               ${button("lcd_palette", "olive", "", ` aria-label="${t("Olive", "Олива")}"`)}${button("lcd_palette", "graphite", "", ` aria-label="${t("Graphite", "Графіт")}"`)}
@@ -4043,17 +4097,9 @@
             </div>
             ${row("particles", t("Flow", "Потоки"),
               button("lcd_particles", "dot", t("Dot", "Крапка")) + button("lcd_particles", "glow", t("Glow", "Світло")) + button("lcd_particles", "packet", t("Packet", "Пакет")))}` : ""}
-          ${row("mode", t("Look", "Вигляд"),
-            button("lcd_appearance", "light", icon.light, ` aria-label="${t("Light", "Світле")}"`) +
-            button("lcd_appearance", "dark", icon.dark, ` aria-label="${t("Dark", "Темне")}"`) +
-            button("lcd_appearance", "auto", icon.auto + `<span>${t("Auto", "Авто")}</span>`))}
-          ${auto ? row("source", t("Auto by", "Авто за"),
-            button("lcd_auto_source", "ha", "HA", ` title="${t("Home Assistant theme", "Тема Home Assistant")}"`) +
-            button("lcd_auto_source", "sun", t("Sun", "Сонце"), ` title="${t("Sunrise / sunset", "Схід / захід сонця")}"`) +
-            button("lcd_auto_source", "device", t("Device", "Пристрій"), ` title="${t("Device theme", "Тема пристрою")}"`)) : ""}
         </div>
         <div class="ap-footer">
-          <p data-visual-status role="status">${t("Applied at once · saved in this browser", "Застосовується одразу · зберігається в цьому браузері")}</p>
+          <div class="ap-flags" role="group" aria-label="${t("Language", "Мова")}">${flag("uk", "Українська", ukraine)}${flag("en", "English", britain)}</div>
           <button type="button" data-visual-reset>${t("Reset", "Скинути")}</button>
         </div>`;
     }
