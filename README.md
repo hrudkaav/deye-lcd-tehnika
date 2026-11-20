@@ -50,7 +50,7 @@
 
 1. Завантажте `deye-lcd-tehnika.js` з останнього [релізу](https://github.com/hrudkaav/deye-lcd-tehnika/releases) і покладіть у `/config/www/`.
 2. У Home Assistant: **Налаштування → Дашборди → ⋮ → Ресурси → Додати ресурс**.
-3. Адреса `/local/deye-lcd-tehnika.js?v=0.8.29`, тип — **JavaScript-модуль**.
+3. Адреса `/local/deye-lcd-tehnika.js?v=0.8.30`, тип — **JavaScript-модуль**.
 4. Оновіть сторінку браузера.
 
 ### Оновлення з попередніх версій (`deye-lcd-8k.js`)

@@ -9,7 +9,7 @@
   const legacyCardTag = "deye-lcd-8k";
   if (customElements.get(cardTag)) return;
 
-  const version = "Alpha 0.8.29";
+  const version = "Alpha 0.8.30";
   const currentVersion = version.replace(/^[^\d]*/, "");
   const models = [3, 5, 6, 8, 10, 12, 15, 20, 30, 80, 160];
   const defaultModel = 8;
@@ -3715,6 +3715,7 @@ ${gridStyles}
         this.previewObserver = new ResizeObserver(() => this.placeRings());
       }
       let host = slot.querySelector(".ms-host");
+      const firstMount = !host;
       if (!host) {
         slot.innerHTML = `<div class="ms-wrap"><div class="ms-host"></div><div class="ms-ov"></div></div>
           <p class="v-legend"><span><i class="v-ring empty"></i>${escapeHtml(t("no power linked", "немає потужності"))}</span>
@@ -3729,7 +3730,11 @@ ${gridStyles}
         this.previewCard.setConfig({ ...this.config });
         if (this.hassData) this.previewCard.hass = this.hassData;
       } catch { /* the preview must never break the editor */ }
-      requestAnimationFrame(() => requestAnimationFrame(() => this.placeRings()));
+      const settle = () => this.placeRings();
+      requestAnimationFrame(() => requestAnimationFrame(settle));
+      // On first mount the surrounding HA dialog may still be mid open-animation (a CSS transform,
+      // which ResizeObserver never reports), so re-measure a few more times while it settles.
+      if (firstMount) [120, 260, 420, 650].forEach(ms => setTimeout(settle, ms));
     }
 
     placeRings() {
@@ -3763,18 +3768,27 @@ ${gridStyles}
           aria-label="${escapeHtml(`${label} · ${done} / ${total}`)}"></button>
           <span class="ms-chip ${state === "ok" ? "ok" : ""}" style="left:${cx.toFixed(1)}px;top:${(cy - radius - 9).toFixed(1)}px">${done} / ${total}</span>`;
       }
-      // Generator: a ring around its block under the status circle (shown in the preview even when it is off).
+      // Generator: an outline around its actual block (rounded rect, not a circle — the tile itself isn't round).
       const generator = root.querySelector("[data-generator]");
+      const hitRect = generator?.querySelector(".hit");
       const screenMatrix = svg.getScreenCTM?.();
-      if (generator && !generator.hasAttribute("hidden") && screenMatrix) {
+      if (generator && hitRect && !generator.hasAttribute("hidden") && screenMatrix) {
+        const gx = parseFloat(hitRect.getAttribute("x")) || 0;
+        const gy = parseFloat(hitRect.getAttribute("y")) || 0;
+        const gw = parseFloat(hitRect.getAttribute("width")) || 0;
+        const gh = parseFloat(hitRect.getAttribute("height")) || 0;
+        const grx = parseFloat(hitRect.getAttribute("rx")) || 0;
+        const margin = 4.5;
         const unit = Math.hypot(screenMatrix.a, screenMatrix.b);
-        const cx = screenMatrix.a * 197.5 + screenMatrix.c * 214.5 + screenMatrix.e - box.left;
-        const cy = screenMatrix.b * 197.5 + screenMatrix.d * 214.5 + screenMatrix.f - box.top;
-        const radius = 47 * unit;
+        const x0 = screenMatrix.a * gx + screenMatrix.c * gy + screenMatrix.e - box.left;
+        const y0 = screenMatrix.b * gx + screenMatrix.d * gy + screenMatrix.f - box.top;
+        const left = x0 - margin, top = y0 - margin;
+        const w = gw * unit + margin * 2, h = gh * unit + margin * 2;
+        const radiusPx = grx * unit + margin;
         const { done, total, state } = gridProgress(config, states, "generator");
-        html += `<button type="button" class="ms-hot ${state}" data-gsource="generator" style="left:${(cx - radius).toFixed(1)}px;top:${(cy - radius).toFixed(1)}px;width:${(2 * radius).toFixed(1)}px;height:${(2 * radius).toFixed(1)}px"
+        html += `<button type="button" class="ms-hot ${state}" data-gsource="generator" style="left:${left.toFixed(1)}px;top:${top.toFixed(1)}px;width:${w.toFixed(1)}px;height:${h.toFixed(1)}px;border-radius:${radiusPx.toFixed(1)}px"
           aria-label="${escapeHtml(`${t("Generator", "Генератор")} · ${done} / ${total}`)}"></button>
-          <span class="ms-chip ${state === "ok" ? "ok" : ""}" style="left:${cx.toFixed(1)}px;top:${(cy + radius + 2).toFixed(1)}px">${done} / ${total}</span>`;
+          <span class="ms-chip ${state === "ok" ? "ok" : ""}" style="left:${(left + w / 2).toFixed(1)}px;top:${(top + h + 2).toFixed(1)}px">${done} / ${total}</span>`;
       }
       overlay.innerHTML = html;
     }
