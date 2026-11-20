@@ -9,7 +9,7 @@
   const legacyCardTag = "deye-lcd-8k";
   if (customElements.get(cardTag)) return;
 
-  const version = "Alpha 0.8.24";
+  const version = "Alpha 0.8.25";
   const models = [3, 5, 6, 8, 10, 12, 15, 20, 30, 80, 160];
   const defaultModel = 8;
   const themes = [
@@ -18,7 +18,15 @@
   ];
   const manualAppearances = ["light", "dark"];
   const visualValues = { lcd_theme:["classic","technika"], lcd_palette:["olive","graphite"],
-    lcd_appearance:["light","dark","auto"], lcd_auto_source:["ha","sun","device"], lcd_particles:["dot","glow","packet"], language:["uk","en"] };
+    lcd_appearance:["light","dark","auto"], lcd_auto_source:["ha","sun","device"], lcd_particles:["dot","glow","packet"] };
+  // One language switch for the card and its editor: the flags in «Т» and the editor field write the same browser value.
+  const languageKey = "deye-lcd-tehnika:language";
+  const languageEvent = "deye-lcd-tehnika-language";
+  const storedLanguage = () => { try { const value = localStorage.getItem(languageKey); return value === "en" || value === "uk" ? value : null; } catch { return null; } };
+  const storeLanguage = (value) => {
+    try { localStorage.setItem(languageKey, value === "en" ? "en" : "uk"); } catch { /* kept for this page only */ }
+    window.dispatchEvent(new CustomEvent(languageEvent, { detail:value }));
+  };
   const threePhaseValues = ["3", 3];
   const acSources = ["grid", "load"];
   const screenWhite = "#ffffff";
@@ -157,8 +165,9 @@
         radio("work_mode", "ct", "Zero Export To CT", "Нульовий експорт · CT", 12, 115, 168),
         number("max_solar_power", "Max Solar Power", "Ліміт сонячної генерації", 163, 42, 65, "W"),
         label("Max Solar Power", "Ліміт сонця", 232, 43, 114, "start", 23, 2.95),
-        toggle("solar_sell", "Solar Sell", "Продаж надлишку", 185, 77, 153),
-        toggle("solar_sell", "Solar Sell", "Продаж надлишку", 185, 114, 153),
+        // One Solar Sell setting shown in both zero-export rows; only the row of the selected mode is active.
+        { ...toggle("solar_sell", "Solar Sell", "Продаж надлишку", 185, 77, 153), forMode:"load" },
+        { ...toggle("solar_sell", "Solar Sell", "Продаж надлишку", 185, 114, 153), forMode:"ct" },
         label("Max Sell Power", "Ліміт продажу", 9, 156, 103),
         number("max_sell_power", "Max Sell Power", "Ліміт продажу", 113, 150, 50, "", 26),
         label("Zero-export Power", "Нульовий експорт", 167, 156, 128),
@@ -1020,7 +1029,7 @@
     if (kind === "alarms") return `<div class="native-alarms" ${position} data-readout="${name}" tabindex="0">—</div>`;
     const aria = `${textAttributes(text, "label")} aria-label="${escapeHtml(text.uk)}"`;
     if (kind === "checkbox" || kind === "radio") {
-      return `<label class="lcd-setting lcd-check native-check" data-setting="${name}" ${position}${compact ? " data-compact" : ""}>
+      return `<label class="lcd-setting lcd-check native-check" data-setting="${name}" ${position}${compact ? " data-compact" : ""}${control.forMode ? ` data-for-mode="${control.forMode}"` : ""}>
         <input type="${kind}"${kind === "radio" ? ` name="${name}" value="${control.option}"` : ""} ${aria} disabled/>
         ${compact ? "" : translated(text)}
       </label>`;
@@ -1487,12 +1496,16 @@
     .lcd-number select { text-overflow:ellipsis; cursor:pointer; }
     .lcd-number option { color:var(--lcd-dark); background:var(--lcd-field); }
     .lcd-unit { padding-inline-end:.45cqi; flex:none; font-size:.82em; }
+    .lcd-number-value[data-unit] { justify-content:center; }
+    .lcd-number-value[data-unit] input { flex:0 0 auto; padding:0; text-align:end; }
+    .lcd-number-value[data-unit] .lcd-unit { padding:0; font-size:1em; }
     .lcd-unit:empty { display:none; }
     .native-number button {
       flex:0 0 5.8cqi; padding:0; font:inherit; border-radius:2px; color:var(--lcd-dark);
       border:1px solid var(--lcd-line); background:var(--lcd-field);
     }
     .native-check { display:flex; align-items:center; gap:.8cqi; cursor:pointer; }
+    .native-check[data-inactive] { opacity:.45; cursor:default; }
     .native-check span { min-width:0; overflow-wrap:normal; }
     .native-check[data-compact] { justify-content:center; }
     .native-check input {
@@ -2698,6 +2711,10 @@
     .v-nav small{display:block;font-size:2.2cqw;opacity:.75}
     .v-nav .v-back{flex:1.25;background:#f2b632;color:#2a1e05;border-color:#f2b632;align-content:center;gap:.4cqw}
     .v-nav .v-back small{font-size:2.3cqw;opacity:1;font-weight:700}
+    .v-groups { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; overflow:visible; }
+    .v-group-tag { position:absolute; transform:translate(-100%,-55%); z-index:2; padding:.15cqw .9cqw; border-radius:6px; color:#1d1406;
+      font-size:2.1cqw; font-weight:700; white-space:nowrap; pointer-events:none; line-height:1.3; }
+    .v-ctl.v-dim { opacity:.5; }
     .v-progress,.v-legend{margin:0;color:var(--secondary-text-color,#a7bac9);font-size:.9em}
     .v-legend{display:flex;flex-wrap:wrap;gap:6px 14px}
     .v-legend span{display:inline-flex;align-items:center;gap:6px}
@@ -2837,6 +2854,7 @@
       this.modal.addEventListener("close", () => { if (!this.modal.open) this.matchContext = null; });
       this.layout.addEventListener("click", event => this.navigate(event));
       this.layout.addEventListener("input", event => this.visualInput(event));
+      window.addEventListener(languageEvent, () => { if (this.config && this.config.language !== storedLanguage()) { this.schemaKey = ""; this.layoutKey = ""; this.setConfig(this.config); } });
       this.form = document.createElement("ha-form");
       this.form.addEventListener("value-changed", event => this.formChanged(event));
       this.render();
@@ -2848,7 +2866,8 @@
     }
 
     setConfig(config) {
-      this.config = { ...config };
+      // The editor speaks the same language as the card's flags; Ukrainian by default.
+      this.config = { ...config, language:storedLanguage() ?? (config.language === "en" ? "en" : "uk") };
       this.render();
     }
 
@@ -2871,7 +2890,10 @@
           changed = true;
         }
       }
-      if (changed) this.commit(next);
+      if (changed) {
+        if (next.language !== this.config.language) storeLanguage(next.language);
+        this.commit(next);
+      }
     }
 
     commit(next) {
@@ -3137,9 +3159,11 @@
         const text = control.label ? local(control.label, this.config) : title;
         const value = state === "bound" ? this.visualValue(bindName, control) : "";
         const mark = { bound:"✓", shared:"⇄", empty:"+", alias:"", derived:"", locked:"🔒" }[state];
-        let inner;
+        let inner, dim = false;
         if (control.kind === "checkbox" || control.kind === "radio") {
-          const sign = state !== "bound" ? mark : control.kind === "checkbox" ? (value === "off" ? "" : "✓")
+          const modeValue = control.forMode ? this.visualValue("work_mode") : "";
+          dim = Boolean(modeValue && modeValue !== "—" && !this.visualOptionMatches("work_mode", control.forMode, modeValue));
+          const sign = state !== "bound" || dim && state !== "bound" ? mark : dim ? "" : control.kind === "checkbox" ? (value === "off" ? "" : "✓")
             : this.visualOptionMatches(bindName, control.option, value) ? "●" : "";
           inner = `<i class="v-box${control.kind === "radio" ? " round" : ""}">${escapeHtml(sign)}</i>${control.compact ? "" : `<b>${escapeHtml(text)}</b>`}`;
         } else if (control.kind === "alarms") {
@@ -3149,13 +3173,14 @@
         } else if (state === "derived") {
           inner = `<b>${escapeHtml(t("from below", "з полів нижче"))}</b>`;
         } else {
-          inner = `<b>${escapeHtml(state === "bound" ? `${value || "✓"}${value && control.unit && value !== "—" ? ` ${control.unit}` : ""}` : mark)}</b>`;
+          inner = `<b>${escapeHtml(state === "bound" ? `${value || "✓"}${value && control.unit && value !== "—" ? control.unit : ""}` : mark)}</b>`;
         }
         const disabled = ["alias", "derived", "locked"].includes(state);
         const selected = this.visualField === bindName ? " selected" : "";
-        return `<button type="button" class="v-ctl v-${state} v-${control.kind}${control.compact ? " v-compact" : ""}${selected}" style="${box(control)}"
+        return `<button type="button" class="v-ctl v-${state} v-${control.kind}${control.compact ? " v-compact" : ""}${selected}${dim ? " v-dim" : ""}" style="${box(control)}"
           ${disabled ? "disabled" : `data-vfield="${escapeHtml(bindName)}"`} title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}">${inner}</button>`;
       }).join("");
+      const frames = this.visualGroupFrames(screen, pct);
       const extras = screen.extra.filter(name => this.visualDomains(name).length);
       for (const name of extras) names.add(name);
       const bound = [...names].filter(name => ["bound", "shared"].includes(this.visualState(name))).length;
@@ -3174,13 +3199,63 @@
         </div>`;
       slot.innerHTML = `<div class="v-screen" data-readonly="${readOnly}">
           <div class="v-head"><b>${escapeHtml(heading)}</b>${badge(readOnly)}</div>
-          <div class="v-body">${controls}</div>${nav}
+          <div class="v-body">${frames}${controls}</div>${nav}
         </div>
         <div class="v-sheet-slot"></div>
         <p class="v-progress">${escapeHtml(t(`Linked on this page: ${bound} of ${names.size}`, `Прив’язано на сторінці: ${bound} з ${names.size}`))}</p>
         ${extras.length ? `<div class="v-extra"><h3>${escapeHtml(t("Additional for this page", "Додатково для цієї сторінки"))}</h3><div>${chips}</div></div>` : ""}
         ${legend}`;
       this.renderSheet();
+    }
+
+    visualGroupFrames(screen, pct) {
+      // Items that share one entity (radio choices, the two Solar Sell rows) get one dashed frame of their own colour.
+      const t = this.t.bind(this);
+      const colours = ["#ff9f6b", "#c59bff", "#5fd6c8", "#ffd166"];
+      const members = {};
+      for (const control of screen.controls) {
+        if (!control.name || control.alias || !["radio", "checkbox"].includes(control.kind)) continue;
+        (members[control.name] ??= []).push(control);
+      }
+      const groups = Object.entries(members).filter(([, list]) => list.length > 1);
+      if (!groups.length) return "";
+      const rect = (c, pad = 0) => ({ x0:c.x - pad, y0:c.y - pad, x1:c.x + c.w + pad, y1:c.y + c.h + pad });
+      const hit = (a, b) => a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1;
+      const others = (name) => screen.controls.filter(c => c.name && c.name !== name && c.kind !== "label").map(c => rect(c));
+      const placed = [];
+      let svg = "", tags = "";
+      groups.forEach(([name, list], index) => {
+        const colour = colours[index % colours.length];
+        const foreign = others(name);
+        const box = list.reduce((a, c) => { const r = rect(c); return { x0:Math.min(a.x0, r.x0), y0:Math.min(a.y0, r.y0), x1:Math.max(a.x1, r.x1), y1:Math.max(a.y1, r.y1) }; },
+          { x0:Infinity, y0:Infinity, x1:-Infinity, y1:-Infinity });
+        // One frame around the whole group when nothing else sits inside it; otherwise a frame around each item.
+        const centre = (r) => ({ x:(r.x0 + r.x1) / 2, y:(r.y0 + r.y1) / 2 });
+        const inside = (r) => { const c = centre(r); return c.x > box.x0 && c.x < box.x1 && c.y > box.y0 && c.y < box.y1; };
+        const split = foreign.some(inside);
+        const shapes = split ? list.map(c => rect(c)) : [box];
+        const frames = shapes.map(shape => {
+          let pad = 3.5;
+          const grow = (p) => ({ x0:shape.x0 - p, y0:shape.y0 - p, x1:shape.x1 + p, y1:shape.y1 + p });
+          while (pad > .8 && (foreign.some(r => hit(r, grow(pad))) || placed.some(r => hit(r, grow(pad))))) pad -= .4;
+          return grow(Math.max(.8, pad));
+        });
+        placed.push(...frames);
+        if (split) {
+          // Separate frames of one group are tied together by a dashed line along their left side.
+          const x = Math.max(1.5, Math.min(...frames.map(f => f.x0)) - 2.2);
+          const ys = frames.map(f => (f.y0 + f.y1) / 2);
+          svg += `<path d="M${x} ${Math.min(...ys)}V${Math.max(...ys)}" stroke="${colour}" stroke-width="1.6" stroke-dasharray="3 2" fill="none" vector-effect="non-scaling-stroke"/>`;
+          for (const f of frames) svg += `<path d="M${x} ${((f.y0 + f.y1) / 2).toFixed(1)}H${f.x0.toFixed(1)}" stroke="${colour}" stroke-width="1.6" fill="none" vector-effect="non-scaling-stroke"/>`;
+        }
+        for (const f of frames) {
+          svg += `<rect x="${f.x0.toFixed(1)}" y="${f.y0.toFixed(1)}" width="${(f.x1 - f.x0).toFixed(1)}" height="${(f.y1 - f.y0).toFixed(1)}" rx="5"
+            fill="${colour}14" stroke="${colour}" stroke-width="1.3" stroke-dasharray="4 2.6" vector-effect="non-scaling-stroke"/>`;
+        }
+        const first = frames[0];
+        tags += `<span class="v-group-tag" style="left:${pct(first.x1 - 2, visualScreen.w)};top:${pct(first.y0, visualScreen.h)};background:${colour}">${escapeHtml(t("1 entity", "1 сутність"))}</span>`;
+      });
+      return `<svg class="v-groups" viewBox="0 0 ${visualScreen.w} ${visualScreen.h}" preserveAspectRatio="none" aria-hidden="true">${svg}</svg>${tags}`;
     }
 
     renderSheet() {
@@ -3197,8 +3272,11 @@
       const help = this.visualHelpText(name, control, domains);
       slot.innerHTML = `<section class="v-sheet" aria-label="${escapeHtml(t("Choose an entity", "Вибір сутності"))}">
         <div class="v-sheet-head"><div><h3>${escapeHtml(title)}</h3><small>${escapeHtml(t("fits: ", "підходять: "))}${escapeHtml(domains.join(" / "))}</small>
-          ${this.visualOptionCount(name) > 1 ? `<small class="v-shared-note">${escapeHtml(t(`One select for all ${this.visualOptionCount(name)} options on the screen — they are filled together; the one matching the entity state is marked ●.`,
-            `Одна сутність select на всі ${this.visualOptionCount(name)} варіанти на екрані — вони заповнюються разом; поточний варіант позначено ●.`))}</small>` : ""}</div>
+          ${this.visualOptionCount(name) > 1 ? `<small class="v-shared-note">${escapeHtml(name === "solar_sell"
+            ? t("One entity for both rows. Solar Sell applies to the selected zero-export mode; the other row is greyed out.",
+              "Одна сутність на обидва рядки. Продаж надлишку діє для вибраного режиму нульового експорту, другий рядок сірий.")
+            : t(`One entity for all ${this.visualOptionCount(name)} items in the frame — they are filled together; the current one is marked ●.`,
+              `Одна сутність на всі ${this.visualOptionCount(name)} пункти в рамці — вони заповнюються разом; поточний позначено ●.`))}</small>` : ""}</div>
           <button type="button" class="v-help-btn" data-vhelp aria-pressed="${Boolean(this.visualHelp)}"><span aria-hidden="true">?</span>${escapeHtml(this.visualHelp ? t("Hide", "Сховати") : t("Tip", "Порада"))}</button></div>
         ${this.visualHelp ? `<div class="v-help"><h4>${t("WHAT THIS IS", "ЩО ЦЕ ЗА ПУНКТ")}</h4><p>${escapeHtml(help.what)}</p>
           <h4>${t("NO MATCH? SEARCH FOR", "ЯКЩО НЕМАЄ ЗБІГУ — ШУКАЙТЕ")}</h4><div class="v-terms">${help.terms.map(term => `<button type="button" data-vterm="${escapeHtml(term)}">${escapeHtml(term)}</button>`).join("")}</div>
@@ -3213,7 +3291,7 @@
 
     visualOptionCount(name) {
       const screen = settingsMenus.flatMap(menu => menu.pages).find(page => page.controls.some(item => item.name === name));
-      return screen ? screen.controls.filter(item => item.name === name && item.kind === "radio").length : 0;
+      return screen ? screen.controls.filter(item => item.name === name && !item.alias && ["radio", "checkbox"].includes(item.kind)).length : 0;
     }
 
     visualPageControl(name) {
@@ -3643,7 +3721,8 @@
       });
       this.appearanceDialog.addEventListener("click", event => {
         const button = event.target.closest("button");
-        if (button?.dataset.visualKey === "lcd_appearance" && button.dataset.visualValue === "auto") this.cycleAutoAppearance();
+        if (button?.dataset.language) { storeLanguage(button.dataset.language); this.renderAppearance(); this.appearanceDialog.querySelector(`[data-language="${button.dataset.language}"]`)?.focus({ preventScroll:true }); }
+        else if (button?.dataset.visualKey === "lcd_appearance" && button.dataset.visualValue === "auto") this.cycleAutoAppearance();
         else if (button?.dataset.visualKey) this.setVisualPreference(button.dataset.visualKey, button.dataset.visualValue);
         else if (button?.dataset.visualReset !== undefined) this.resetVisualPreferences();
       });
@@ -3844,9 +3923,9 @@
         this.localize();
       }
       this.loadVisualPreferences();
-      // A language picked with the flags in the «Т» menu wins over the card setting, in this browser only.
-      const language = this.visualPreferences?.language;
-      if (language && language !== config.language) { this.setConfig({ ...config, language }, true); return; }
+      // The language chosen with the flags or in the editor wins over the card setting, in this browser; Ukrainian by default.
+      const language = storedLanguage() ?? (config.language === "en" ? "en" : "uk");
+      if (language !== config.language) { this.setConfig({ ...config, language }, true); return; }
       const technika = this.visualConfig().lcd_theme === "technika";
       this.dataset.theme = technika ? "technika" : "classic";
       this.dataset.palette = this.visualConfig().lcd_palette === "graphite" ? "graphite" : "olive";
@@ -3918,6 +3997,8 @@
       this.updateClock();
       clearInterval(this.timer);
       this.timer = setInterval(() => this.updateClock(), 1000);
+      this.onLanguage ??= () => { if (this.sourceConfig) this.setConfig(this.sourceConfig); };
+      window.addEventListener(languageEvent, this.onLanguage);
       this.syncFlowEngine();
     }
 
@@ -3926,6 +4007,7 @@
       clearInterval(this.timer);
       if (this.flowFrame) cancelAnimationFrame(this.flowFrame);
       this.flowFrame = 0;
+      if (this.onLanguage) window.removeEventListener(languageEvent, this.onLanguage);
       this.closeDetails();
       this.closeSettings();
       this.closeAppearance(false);
@@ -4076,7 +4158,7 @@
       const sources = visualValues.lcd_auto_source;
       const sourceName = { ha:t("by HA theme", "за темою HA"), sun:t("by the sun", "за сонцем"), device:t("by device", "за пристроєм") }[config.lcd_auto_source] ?? "";
       const dots = `<span class="ap-dots" aria-hidden="true">${sources.map(source => `<i${source === config.lcd_auto_source ? " data-current" : ""}></i>`).join("")}</span>`;
-      const flag = (value, label, art) => `<button type="button" class="ap-flag" data-visual-key="language" data-visual-value="${value}" aria-pressed="${(config.language === "en" ? "en" : "uk") === value}" aria-label="${label}" title="${label}">${art}</button>`;
+      const flag = (value, label, art) => `<button type="button" class="ap-flag" data-language="${value}" aria-pressed="${(config.language === "en" ? "en" : "uk") === value}" aria-label="${label}" title="${label}">${art}</button>`;
       const ukraine = '<svg viewBox="0 0 3 2" aria-hidden="true"><rect width="3" height="1" fill="#0057b7"/><rect y="1" width="3" height="1" fill="#ffd700"/></svg>';
       const britain = '<svg viewBox="0 0 60 30" aria-hidden="true"><path d="M0 0h60v30H0z" fill="#012169"/><path d="M0 0l60 30M60 0L0 30" stroke="#fff" stroke-width="6"/><path d="M0 0l60 30M60 0L0 30" stroke="#c8102e" stroke-width="2.4"/><path d="M30 0v30M0 15h60" stroke="#fff" stroke-width="10"/><path d="M30 0v30M0 15h60" stroke="#c8102e" stroke-width="6"/></svg>';
       // Common options first; options that only the ТЕХНіКА theme has always go below them.
@@ -4867,7 +4949,16 @@
         blocked ||= Boolean(draft && disabled);
         waiting ||= pendingUpdate;
         expired ||= pending.some(item => item.expired);
-        for (const view of views) this.renderSettingView(view, setting, value, disabled, draft);
+        for (const view of views) {
+          const forMode = view.element.dataset.forMode;
+          if (forMode) {
+            const mode = this.settingsDrafts.get("work_mode")?.raw ?? this.readSetting("work_mode").current;
+            const inactive = mode !== null && mode !== undefined && mode !== forMode;
+            view.element.toggleAttribute("data-inactive", inactive);
+            if (inactive) { this.renderSettingView(view, setting, false, true, undefined); continue; }
+          }
+          this.renderSettingView(view, setting, value, disabled, draft);
+        }
       }
       this.renderReadouts(page.readouts);
       this.viewOnlyLabel.hidden = this.canEditSettings() || !page.fields.size;
@@ -4911,7 +5002,9 @@
         const text = this.settingText(value);
         if (text !== input.value) input.value = text;
         const fallback = element.dataset.unit;
-        unit.textContent = showSelect || !available ? "" : setting.unit || this.t(fallback, unitsUk[fallback] ?? fallback);
+        // As on the Deye screen: a unit only where the original shows one, written right after the number.
+        unit.textContent = showSelect || !available || !fallback ? "" : setting.unit || this.t(fallback, unitsUk[fallback] ?? fallback);
+        this.fitNumber(input, unit);
       }
       for (const button of steppers) {
         const step = this.numericTarget(setting)?.entity.attributes?.step;
@@ -4921,6 +5014,20 @@
       element.toggleAttribute("data-dirty", Boolean(draft));
       element.toggleAttribute("data-locked", Boolean(setting.locked));
       if (setting.locked) element.title = this.t("Locked for safety: factory reset is never sent from the card.", "Заблоковано з міркувань безпеки: скидання налаштувань з картки не надсилається.");
+    }
+
+    fitNumber(input, unit) {
+      const box = input.parentElement;
+      if (!box || input.hidden) return;
+      const length = Math.max(1, (input.value || input.placeholder || "").length);
+      input.style.width = unit.textContent ? `${length + .4}ch` : "";
+      box.toggleAttribute("data-unit", Boolean(unit.textContent));
+      box.style.fontSize = "";
+      // Long values shrink a little inside their own field instead of spilling over the frame.
+      for (const size of [.9, .8, .72]) {
+        if (box.scrollWidth <= box.clientWidth + .5) break;
+        box.style.fontSize = `${size}em`;
+      }
     }
 
     settingRequests(name, draft) {
