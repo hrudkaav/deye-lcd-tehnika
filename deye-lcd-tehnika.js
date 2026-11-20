@@ -9,7 +9,7 @@
   const legacyCardTag = "deye-lcd-8k";
   if (customElements.get(cardTag)) return;
 
-  const version = "Alpha 0.8.26";
+  const version = "Alpha 0.8.27";
   const currentVersion = version.replace(/^[^\d]*/, "");
   const models = [3, 5, 6, 8, 10, 12, 15, 20, 30, 80, 160];
   const defaultModel = 8;
@@ -1528,6 +1528,9 @@
     }
     .native-check input[type="radio"] { width:4.1cqi; height:4.1cqi; border-radius:50%; }
     .native-check input:checked::before { content:""; width:70%; height:70%; border-radius:50%; background:var(--lcd-mark,var(--lcd-dark)); }
+    /* Radio dot drawn as a centred gradient: a pseudo element lands half a pixel off on fractional sizes. */
+    .native-check:not([data-setting="energy_pattern"]) input[type="radio"]:checked { background:radial-gradient(circle closest-side, var(--lcd-mark,var(--lcd-dark)) 70%, transparent calc(70% + .6px)), var(--lcd-field); }
+    .native-check:not([data-setting="energy_pattern"]) input[type="radio"]:checked::before { content:none; }
     .native-check[data-setting="energy_pattern"] input { width:5.2cqi; height:5.2cqi; border-radius:1px; }
     .native-check input[type="checkbox"]:checked::before,
     .native-check[data-setting="energy_pattern"] input:checked::before {
@@ -1858,6 +1861,49 @@
     :host([data-appearance="dark"]) ha-card {
       background:var(--dark-frame); border-color:var(--dark-frame-edge);
     }
+    /* КЛАСіК · dark: black screen, white icons and digits, gauges coloured by power (green → red); night-blue menu header. */
+    :host([data-theme="classic"][data-appearance="dark"]) {
+      --dark-surface:#050608;
+      --dark-screen:#050608;
+      --dark-frame:#050608;
+      --dark-frame-edge:#1d2227;
+      --dark-track:#262c32;
+      --dark-display-ink:#ffffff;
+      --dark-value:#ffffff;
+      --dark-unit:#8b949c;
+      --dark-soc:#ffffff;
+      --dark-status:#f2f4f6;
+      --dark-status-edge:#f2f4f6;
+      --dark-header:linear-gradient(180deg,#0f2234,#0b1928);
+      --dark-divider:#2a6f99;
+      --dark-tile:#0b1116;
+      --dark-edge:#22465c;
+      --dark-ink:#f4faff;
+      --dark-control-ink:#ffffff;
+      --dark-muted:#9fb4c0;
+      --dark-field:#0b1116;
+      --dark-field-edge:#2e5c75;
+      --dark-hover:#0c1c29;
+      --dark-mark:#6fd86c;
+      --dark-apply:#1d3a24;
+      --dark-plot:#0a0e12;
+      --dark-rule:#1f2a31;
+      --dark-zero:#3c4a53;
+      --dark-trace:#f2f4f6;
+    }
+    :host([data-theme="classic"][data-appearance="dark"]) .screen { background:radial-gradient(ellipse at 50% 40%,#0a0c0f 0%,#050608 75%); }
+    :host([data-theme="classic"][data-appearance="dark"]) .gauge .fill { stroke:url(#deye-classic-power); }
+    :host([data-theme="classic"][data-appearance="dark"]) .symbol { color:#f2f4f6; }
+    :host([data-theme="classic"][data-appearance="dark"]) .wire-track { stroke:#4a535b; }
+    :host([data-theme="classic"][data-appearance="dark"]) .arrow { fill:#8b949c; }
+    :host([data-theme="classic"][data-appearance="dark"]) .dot { fill:#f2f4f6; }
+    :host([data-theme="classic"][data-appearance="dark"]) .status { stroke-width:2; }
+    :host([data-theme="classic"][data-appearance="dark"]) .t-ring-line,
+    :host([data-theme="classic"][data-appearance="dark"]) .t-ring-letter { stroke:#f2f4f6; }
+    :host([data-theme="classic"][data-appearance="dark"][data-update]) .t-ring-inner { stroke:#e8a317; }
+    :host([data-theme="classic"][data-appearance="dark"]) .details-screen { background:#050608; }
+    :host([data-theme="classic"][data-appearance="dark"]) .details-metric dd { color:#ffffff; }
+
     :host([data-appearance="dark"]) .screen { background:var(--dark-screen); }
     :host([data-theme="technika"][data-appearance="dark"]) .screen {
       background:#1a1c1e url("${smokedDarkBackground}") center / 100% 100% no-repeat;
@@ -3701,6 +3747,9 @@
             </linearGradient>
             ${technikaDefinitions}
             <linearGradient id="deye-t-fill" x1="0" y1="0" x2=".3" y2="1"><stop offset="0"/><stop offset="1"/></linearGradient>
+            <linearGradient id="deye-classic-power" gradientUnits="userSpaceOnUse" x1="-38" y1="0" x2="38" y2="0">
+              <stop offset="0" stop-color="#3ccf4e"/><stop offset=".45" stop-color="#b5e03a"/><stop offset=".65" stop-color="#ffd43b"/><stop offset=".82" stop-color="#ff9a2e"/><stop offset="1" stop-color="#ff3b30"/>
+            </linearGradient>
             <linearGradient id="deye-t-shine" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".45"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>
             <filter id="deye-t-glow" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="1.4"/></filter>
           </defs>
