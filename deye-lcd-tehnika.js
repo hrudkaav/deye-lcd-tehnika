@@ -9,7 +9,7 @@
   const legacyCardTag = "deye-lcd-8k";
   if (customElements.get(cardTag)) return;
 
-  const version = "Alpha 0.8.30";
+  const version = "Alpha 0.8.31";
   const currentVersion = version.replace(/^[^\d]*/, "");
   const models = [3, 5, 6, 8, 10, 12, 15, 20, 30, 80, 160];
   const defaultModel = 8;
@@ -1399,6 +1399,12 @@
       const value = reading(entity);
       return value === null ? null : value * (factor ?? 1);
     }
+    if (unit === "c") {
+      const entity = states[id];
+      const value = reading(entity);
+      const fahrenheit = /f$/.test(String(entity?.attributes?.unit_of_measurement ?? "").trim().toLowerCase());
+      return value === null ? null : fahrenheit ? (value - 32) * 5 / 9 : value;
+    }
     return reading(states[id]);
   }
   const batteryFactor = (config, source) => source === "battery" && config.battery_power_x2 === true ? 2 : 1;
@@ -1462,7 +1468,16 @@
     }
     const values = rows.map(({ row }) => row.v).filter(Number.isFinite);
     if (!values.length) return null;
-    if (tile.agg === "sum") return values.reduce((a, b) => a + b, 0);
+    if (tile.agg === "sum") {
+      // The same entity bound on two inverters (a shared meter) is counted once, not doubled.
+      const seen = new Set();
+      return rows.reduce((total, { index, row }) => {
+        if (!Number.isFinite(row.v)) return total;
+        const id = row.bound ? config[inverterField(index, tile.field)] : "";
+        if (id) { if (seen.has(id)) return total; seen.add(id); }
+        return total + row.v;
+      }, 0);
+    }
     if (tile.agg === "max") return Math.max(...values);
     if (tile.agg === "avgOn") {
       // An inverter without the grid must not pull the average voltage down.
@@ -1509,8 +1524,13 @@
       const factor = { kwh:1, "квт·год":1, wh:0.001, "вт·год":0.001, mwh:1000 }[unit];
       if (factor) return { kwh:amount * factor, source:"sensor" };
     }
-    const ah = reading(states[config.battery_capacity]);
-    const volts = reading(states[config.battery_voltage]);
+    const unitOf = entity => String(entity?.attributes?.unit_of_measurement ?? "").trim().toLowerCase();
+    const ahSensor = states[config.battery_capacity], voltSensor = states[config.battery_voltage];
+    const ahRaw = reading(ahSensor), voltRaw = reading(voltSensor);
+    const ahFactor = { "":1, ah:1, "а·год":1, "аг":1, mah:0.001, "ма·год":0.001 }[unitOf(ahSensor)];
+    const voltFactor = { "":1, v:1, "в":1, mv:0.001, "мв":0.001, kv:1000, "кв":1000 }[unitOf(voltSensor)];
+    const ah = ahRaw === null || !ahFactor ? null : ahRaw * ahFactor;
+    const volts = voltRaw === null || !voltFactor ? null : voltRaw * voltFactor;
     if (ah !== null && ah > 0 && volts !== null && volts > 0) return { kwh:ah * volts / 1000, source:"ah" };
     return null;
   }
@@ -1529,22 +1549,41 @@
     if (!h) return t(`${m} min`, `${m} хв`);
     return m ? t(`${h} h ${m} min`, `${h} год ${m} хв`) : t(`${h} h`, `${h} год`);
   }
+  // Idle threshold: 5 W per kW of all installed inverters together (6 kW → 30 W, 2×80 kW → 800 W), at least 30 W.
+  function idleThreshold(config) {
+    const indices = installedInverters(config);
+    const kw = indices.reduce((total, index) => total + readModel(config[inverterField(index, "inverter_model")], indices.length > 1), 0);
+    return Math.max(30, kw * 5);
+  }
   function runtimeInfo(config, states, soc, t) {
     const raw = powerTotal(powerSources(config, gaugeByKey.battery_power), states);
     const power = raw === null ? null : raw * (config.battery_power_x2 === true ? 2 : 1);
     const capacity = batteryCapacityOf(config, states);
     const cutoff = runtimeCutoffOf(config, states);
+    const idle = idleThreshold(config);
     const number = value => (preferEnglish(config) ? englishMeasurementFormat : measurementFormat).format(Math.round(value * 10) / 10);
-    const charging = power !== null && power < 0;
-    const label = charging ? t("Time to full charge", "До повного заряду") : t("Battery runtime", "Час роботи від АКБ");
+    const status = gridStatus(config, states, gridInverters(config, "grid"));
+    const gridPower = powerTotal(powerSources(config, gaugeByKey.grid_power), states);
+    const onGrid = status ? status.on > 0 : gridPower !== null && Math.abs(gridPower) >= idle;
+    const load = powerTotal(powerSources(config, gaugeByKey.load_power), states);
+    const charging = power !== null && power <= -idle;
+    const label = charging ? t("Time to full charge", "До повного заряду")
+      : onGrid ? t("If the grid goes down", "Якщо зникне мережа") : t("Battery runtime", "Час роботи від АКБ");
     let value = "—", note;
     if (!capacity) note = t("Set the battery capacity in the card editor (Main screen → Battery).", "Вкажіть ємність АКБ у редакторі картки («Головний екран» → Батарея).");
-    else if (power === null || soc === null) note = t("Battery power or charge is unavailable.", "Немає даних про потужність або заряд АКБ.");
-    else if (Math.abs(power) < 50) note = t("The battery is idle.", "АКБ у спокої.");
+    else if (soc === null) note = t("Battery charge is unavailable.", "Немає даних про заряд АКБ.");
     else if (charging) {
       value = soc >= 100 ? t("Full", "Заряджено") : durationText(capacity.kwh * (100 - soc) / 100 / (-power / 1000) * 60, t);
       note = t(`to 100 % · ${number(capacity.kwh)} kWh · at the current power`, `до 100 % · ${number(capacity.kwh)} кВт·год · за поточною потужністю`);
-    } else {
+    } else if (onGrid) {
+      if (load === null || load < idle) note = t("Load power is unavailable.", "Немає даних про потужність навантаження.");
+      else {
+        value = soc <= cutoff ? t("Threshold reached", "Поріг досягнуто") : durationText(capacity.kwh * (soc - cutoff) / 100 / (load / 1000) * 60, t);
+        note = t(`down to ${number(cutoff)} % · ${number(capacity.kwh)} kWh · at the current load`, `до ${number(cutoff)} % · ${number(capacity.kwh)} кВт·год · за поточним навантаженням`);
+      }
+    } else if (power === null) note = t("Battery power is unavailable.", "Немає даних про потужність АКБ.");
+    else if (power < idle) note = t("The battery is idle.", "АКБ у спокої.");
+    else {
       value = soc <= cutoff ? t("Threshold reached", "Поріг досягнуто") : durationText(capacity.kwh * (soc - cutoff) / 100 / (power / 1000) * 60, t);
       note = t(`down to ${number(cutoff)} % · ${number(capacity.kwh)} kWh · at the current power`, `до ${number(cutoff)} % · ${number(capacity.kwh)} кВт·год · за поточною потужністю`);
     }
@@ -2757,6 +2796,12 @@
     :host([data-theme="technika"]) .screen[data-battery-flow="charge"] .wire[data-wire="battery"] { --flow:var(--flow-charge); --flow-edge:var(--flow-charge-edge); --flow-body:var(--flow-charge-body); }
     :host([data-theme="technika"]) .screen[data-battery-flow="discharge"] .wire[data-wire="battery"] { --flow:var(--flow-discharge); --flow-edge:var(--flow-discharge-edge); --flow-body:var(--flow-discharge-body); }
     :host([data-theme="technika"]) .screen[data-grid-flow="export"] .wire[data-wire="grid"] { --flow:var(--flow-export); --flow-edge:var(--flow-export-edge); --flow-body:var(--flow-export-body); }
+    /* 0.8.31 · particle colour follows how many particles run on the line: 1 — no glow, 2 green, 3 yellow, 4 red (same rule on all four lines). */
+    :host([data-theme="technika"]) .flow-layer .flow-core { stroke:var(--flow-edge); stroke-width:.6; }
+    :host([data-theme="technika"]) .flow-layer[data-level="1"] :is(.particle-halo, .flow-glow-halo, .flow-tail-glow, .flow-spark) { display:none; }
+    :host([data-theme="technika"]) .flow-layer[data-level="2"] { --flow:#2fbf6a; --flow-edge:#2fbf6a; }
+    :host([data-theme="technika"]) .flow-layer[data-level="3"] { --flow:#f2b632; --flow-edge:#f2b632; }
+    :host([data-theme="technika"]) .flow-layer[data-level="4"] { --flow:#e5392b; --flow-edge:#e5392b; }
 
     /* ── Smooth change between themes and looks ─────────────────────────────────────────────── */
     @media (prefers-reduced-motion:no-preference) {
@@ -2886,7 +2931,7 @@
     const menuGroups = settingsMenus.flatMap(({ id, title, pages }) => {
       const groups = pages.flatMap(({ caption, controls, extra }, index) => {
         const names = new Set([...controls.filter(control => control.name && !control.alias).map(control => control.name), ...extra]);
-        const available = [...names].filter(name => bindingDomains[name] || readingBindings.has(name));
+        const available = [...names].filter(name => !lockedSettings.has(name) && (bindingDomains[name] || readingBindings.has(name)));
         if (!available.length) return [];
         return [group(`menu_${id}_${index}`, local(caption, config), available.map(name => {
           if (bindingDomains[name]) return binding(name);
@@ -3443,6 +3488,10 @@ ${gridStyles}
 
   class DeyeLcdEditor extends HTMLElement {
     connectedCallback() {
+      this.onEditorLanguage ??= () => { if (this.config && this.config.language !== storedLanguage()) { this.schemaKey = ""; this.layoutKey = ""; this.setConfig(this.config); } };
+      window.addEventListener(languageEvent, this.onEditorLanguage);
+      const host = this.layout?.querySelector(".ms-host");
+      if (host && this.previewObserver) this.previewObserver.observe(host);
       if (this.form) return;
       this.tab = "screen";
       this.inverterIndex = 0;
@@ -3485,7 +3534,6 @@ ${gridStyles}
       this.layout.addEventListener("pointerover", event => hover(event, true));
       this.layout.addEventListener("pointerleave", event => hover(event, false));
       this.layout.addEventListener("focusin", event => hover(event, true));
-      window.addEventListener(languageEvent, () => { if (this.config && this.config.language !== storedLanguage()) { this.schemaKey = ""; this.layoutKey = ""; this.setConfig(this.config); } });
       this.form = document.createElement("ha-form");
       this.form.addEventListener("value-changed", event => this.formChanged(event));
       this.render();
@@ -3734,14 +3782,24 @@ ${gridStyles}
       requestAnimationFrame(() => requestAnimationFrame(settle));
       // On first mount the surrounding HA dialog may still be mid open-animation (a CSS transform,
       // which ResizeObserver never reports), so re-measure a few more times while it settles.
-      if (firstMount) [120, 260, 420, 650].forEach(ms => setTimeout(settle, ms));
+      if (firstMount) {
+        for (const id of this.ringTimers ?? []) clearTimeout(id);
+        this.ringTimers = [120, 260, 420, 650].map(ms => setTimeout(settle, ms));
+      }
+    }
+
+    disconnectedCallback() {
+      window.removeEventListener(languageEvent, this.onEditorLanguage);
+      this.previewObserver?.disconnect();
+      for (const id of this.ringTimers ?? []) clearTimeout(id);
+      this.ringTimers = [];
     }
 
     placeRings() {
       const overlay = this.layout?.querySelector(".ms-ov");
       const card = this.previewCard;
       const root = card?.shadowRoot;
-      if (!overlay || !root || this.gridSource) return;
+      if (!this.isConnected || !overlay || !root || this.gridSource) return;
       const t = this.t.bind(this);
       const box = overlay.getBoundingClientRect();
       const svg = root.querySelector("svg.screen");
@@ -4689,6 +4747,14 @@ ${gridStyles}
     }
   }
 
+  // Empty a flow layer and forget its pool key, so particles are rebuilt when the flow comes back.
+  function clearFlowLayer(layer) {
+    if (!layer) return;
+    layer.replaceChildren();
+    delete layer.dataset.key;
+    delete layer.dataset.level;
+  }
+
   class DeyeLcd extends HTMLElement {
     static getStubConfig() {
       return {
@@ -4841,7 +4907,10 @@ ${gridStyles}
         if (!page) return;
         this.detailsPage = page;
         this.updateDetails();
-        if (page === "chart" && this.detailsData) this.renderDetailsHistory();
+        if (page === "chart") {
+          if (this.detailsData) this.renderDetailsHistory();
+          else this.loadDetailsHistory();
+        }
         this.detailsTitle.focus({ preventScroll: true });
       });
       this.historySection = select(".details-history");
@@ -5077,7 +5146,11 @@ ${gridStyles}
       const previous = this.hassData;
       this.hassData = hass;
       if (previousUser !== hass?.user?.id && this.config) this.setConfig(this.config);
-      else if (!this.relevantChange(previous, hass)) return;
+      else if (!this.relevantChange(previous, hass)) {
+        // History may become reachable without any watched state changing.
+        if (historyConnected && this.detailsKey) this.loadDetailsHistory();
+        return;
+      }
       this.updateAppearance();
       this.update();
       if (historyConnected && this.detailsKey) this.loadDetailsHistory();
@@ -5128,9 +5201,6 @@ ${gridStyles}
       const technika = this.dataset.theme === "technika";
       if (technika) {
         this.screen.querySelector(".status-ring").setAttribute("filter", `url(#deye-technika-ring-${appearance})`);
-        for (const dot of this.screen.querySelectorAll(".technika-particle")) {
-          dot.setAttribute("filter", `url(#deye-technika-dot-${appearance})`);
-        }
       }
     }
 
@@ -5477,6 +5547,8 @@ ${gridStyles}
     async loadDetailsHistory() {
       const gauge = gaugeByKey[this.detailsKey];
       if (!gauge) return;
+      // The battery chart lives on its own page: fetch it only once that page is opened.
+      if (gauge.source === "battery" && this.detailsPage !== "chart") { ++this.historyRequest; this.detailsData = null; return; }
       const series = powerSources(this.config, gauge);
       const request = ++this.historyRequest;
       this.detailsData = null;
@@ -6283,7 +6355,7 @@ ${gridStyles}
         cancelAnimationFrame(this.flowFrame);
         this.flowFrame = 0;
       }
-      if (!active && this.wires) for (const wire of Object.values(this.wires)) wire?.querySelector(".flow-layer")?.replaceChildren();
+      if (!active && this.wires) for (const wire of Object.values(this.wires)) clearFlowLayer(wire?.querySelector(".flow-layer"));
     }
 
     flowTick(now) {
@@ -6299,7 +6371,7 @@ ${gridStyles}
         const layer = wire?.querySelector(".flow-layer");
         if (!layer) continue;
         const direction = wire.dataset.flow;
-        if (direction === "off") { if (layer.firstChild) layer.replaceChildren(); continue; }
+        if (direction === "off") { if (layer.firstChild || layer.dataset.key) clearFlowLayer(layer); continue; }
         const state = (this.flowState ??= {})[name] ??= { phase:Math.random(), sparks:[] };
         const track = wire.querySelector(".wire-track");
         if (!state.length || state.track !== track) { state.track = track; state.length = track.getTotalLength(); }
@@ -6310,23 +6382,24 @@ ${gridStyles}
         const key = `${style}|${count}|${appearance}`;
         if (layer.dataset.key !== key) {
           layer.dataset.key = key;
+          layer.dataset.level = String(Math.min(4, count));
           layer.replaceChildren();
           state.sparks = [];
           for (let index = 0; index < count; index++) {
             if (style === "glow") {
               const group = make("g", {});
               const halo = make("g", {});
-              for (const [r, o] of [[8.6, .12], [6.2, .2], [4.3, .34]]) halo.append(make("circle", { r, class:"flow-glow-halo", opacity:o }));
-              group.append(halo, make("circle", { r:2.1, class:"flow-core" }));
+              for (const [r, o] of [[5.6, .14], [4.2, .24], [3.1, .36]]) halo.append(make("circle", { r, class:"flow-glow-halo", opacity:o }));
+              group.append(halo, make("circle", { r:1.8, class:"flow-core" }));
               layer.append(group);
             } else if (style === "packet") {
               const group = make("g", {});
-              group.append(make("path", { class:"flow-tail", "stroke-width":3.4, opacity:.35 }), make("path", { class:"flow-tail", "stroke-width":2.6 }),
-                make("circle", { r:1.9, class:"flow-core" }));
+              group.append(make("path", { class:"flow-tail flow-tail-glow", "stroke-width":3, opacity:.35 }), make("path", { class:"flow-tail", "stroke-width":2.2 }),
+                make("circle", { r:1.6, class:"flow-core" }));
               layer.append(group);
             } else {
-              const group = make("g", { class:"technika-particle", filter:`url(#deye-technika-dot-${appearance})` });
-              group.innerHTML = '<circle r="4.65" class="particle-halo" opacity=".16"/><circle r="3.65" class="particle-halo" opacity=".25"/><circle r="2.92" class="particle-edge"/><circle r="2.23" class="particle-body"/><circle r="1.02" cx="-.61" cy="-.69" fill="#f6fcea"/>';
+              const group = make("g", { class:"technika-particle" });
+              group.innerHTML = '<circle r="3.7" class="particle-halo" opacity=".22"/><circle r="2.5" class="particle-edge"/><circle r="1.9" class="particle-body"/><circle r=".85" cx="-.52" cy="-.58" fill="#f6fcea"/>';
               layer.append(group);
             }
           }
@@ -6351,7 +6424,6 @@ ${gridStyles}
             if (Math.random() < .25 && state.sparks.length < 8) state.sparks.push({ x:point.x, y:point.y, vx:(Math.random() - .5) * 26, vy:(Math.random() - .5) * 26, life:1 });
           } else {
             node.setAttribute("transform", `translate(${point.x.toFixed(2)} ${point.y.toFixed(2)})`);
-            if (style === "glow") node.firstChild.setAttribute("transform", `scale(${(.82 + .18 * Math.sin(now / 150 + index * 2)).toFixed(3)})`);
           }
         }
         if (style === "packet") {

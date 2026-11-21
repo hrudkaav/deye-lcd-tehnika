@@ -5,8 +5,8 @@ Deye · LCD ТЕХНіКА — Alpha 0.8.15
 1. Зробіть резервну копію конфігурації картки.
 2. Скопіюйте deye-lcd-tehnika.js у /config/www/ (в HA це ресурс /local/).
 3. У Home Assistant → Налаштування → Дашборди → ⋮ → Ресурси:
-   – якщо є старий ресурс /local/deye-lcd-8k.js — змініть його адресу на /local/deye-lcd-tehnika.js?v=0.8.30;
-   – якщо ресурсу немає — додайте /local/deye-lcd-tehnika.js?v=0.8.30, тип «JavaScript-модуль».
+   – якщо є старий ресурс /local/deye-lcd-8k.js — змініть його адресу на /local/deye-lcd-tehnika.js?v=0.8.31;
+   – якщо ресурсу немає — додайте /local/deye-lcd-tehnika.js?v=0.8.31, тип «JavaScript-модуль».
 4. Оновіть сторінку, за потреби очистьте кеш браузера.
 5. Наявні картки type: custom:deye-lcd-8k працюють і далі. Нові додавайте як type: custom:deye-lcd-tehnika.
 6. Перевірте номер версії натисканням на центральний індикатор статусу.
