@@ -9,7 +9,7 @@
   const legacyCardTag = "deye-lcd-8k";
   if (customElements.get(cardTag)) return;
 
-  const version = "Alpha 0.8.35";
+  const version = "Alpha 0.8.36";
   const currentVersion = version.replace(/^[^\d]*/, "");
   const models = [3, 5, 6, 8, 10, 12, 15, 20, 30, 80, 160];
   const defaultModel = 8;
@@ -19,7 +19,7 @@
     { value: "3d", label: "3D" },
   ];
   const manualAppearances = ["light", "dark"];
-  const visualValues = { lcd_motion:["on","off"], lcd_theme:["classic","technika","3d"], lcd_palette:["olive","graphite"],
+  const visualValues = { lcd_scene3d:["scene","separate"], lcd_motion:["on","off"], lcd_theme:["classic","technika","3d"], lcd_palette:["olive","graphite"],
     lcd_appearance:["light","dark","auto"], lcd_auto_source:["ha","sun","device"], lcd_particles:["dot","glow","packet"] };
   /*
    * 0.8.33 · «Майстерня»: personal options ordered by the card's sponsors. They are not for everyone,
@@ -624,33 +624,60 @@
   const object3d = { solar:"sun", grid:"grid", battery:"battery", house:"house", generator:"generator" };
   const seasonal3d = new Set(["sun", "grid", "house"]);
   const picture3d = (object, night) => asset3d(seasonal3d.has(object) ? `${object}_${night ? "night" : "day"}_summer` : `${object}_${night ? "night" : "day"}`);
-  // The bezel picture's groove is a 245° arc; the live fill follows exactly that arc.
-  const bezelStart = 147.5, bezelSweep = 245;
+  // 0.8.36 · HUD gauge of the 3D theme: a 240° arc open at the bottom, drawn in code (no picture).
+  const bezelStart = 150, bezelSweep = 240;
   function arc3d(fraction) {
     const end = bezelStart + fraction * bezelSweep;
     return `M${gaugePoint(gaugeRadius, bezelStart)} A${gaugeRadius} ${gaugeRadius} 0 ${fraction * bezelSweep > 180 ? 1 : 0} 1 ${gaugePoint(gaugeRadius, end)}`;
   }
+  const smoke3d = (x, y, dark) => [0, 1, 2].map(k => `<circle class="a3-smoke${dark ? " a3-dark" : ""}" style="animation-delay:${k}s" cx="${x}" cy="${y}" r="2.2" filter="url(#deye-3d-soft)"/>`).join("");
+  /*
+   * 0.8.36 · energy on the power-line wires: the same particles as on the card's lines (style «Потоки»).
+   * Each wire is a small «wire» of the flow engine; its path runs from the far pole to the near one, i.e. towards
+   * the centre of the card, so importing power runs «forward» exactly like the Grid line.
+   * Points are pixels of the picture, measured on it; the group is scaled down so the particles fit thin wires.
+   */
+  function poleWires(prefix, wires, map, scale) {
+    return wires.map((points, k) => {
+      const d = points.map(([cmd, ...xy]) => cmd + xy.reduce((out, value, i) => {
+        if (i % 2) return out;
+        const [x, y] = map(value, xy[i + 1]);
+        return `${out}${out ? " " : ""}${(x / scale).toFixed(2)} ${(y / scale).toFixed(2)}`;
+      }, "")).join(" ");
+      return `<g class="pole-wire" data-wire="${prefix}${k}" data-flow="off" transform="scale(${scale})" aria-hidden="true"><path class="wire-track" d="${d}"/><g class="flow-layer"></g></g>`;
+    }).join("");
+  }
+  // The separate grid picture (1254 px) inside the gauge: 74 units at (-37,-42).
+  const tileGridWires = [
+    [["M", 830, 180], ["Q", 630, 341, 430, 350]],
+    [["M", 840, 220], ["Q", 640, 387, 440, 385]],
+    [["M", 860, 250], ["Q", 655, 435, 450, 420]],
+  ];
+  // The scene (1536 × 1024 px) covers the card: 0.2617 units per pixel, 1 unit cut on each side.
+  const sceneScale = 268 / 1024;
+  const scenePoint = (x, y) => [-1 + x * sceneScale, y * sceneScale];
+  const sceneGridWires = [
+    [["M", 1340, 280], ["Q", 1262, 340, 1186, 305], ["Q", 1095, 330, 1010, 354]],
+    [["M", 1357, 284], ["Q", 1282, 348, 1204, 306], ["Q", 1105, 350, 1010, 376]],
+    [["M", 1375, 288], ["Q", 1300, 356, 1224, 304], ["Q", 1115, 365, 1010, 394]],
+  ];
+  const poleWireNames = [0, 1, 2].flatMap(k => [`pole_tile_${k}`, `pole_scene_${k}`]);
+
   function anim3d(icon, box = [-37, -42, 74]) {
     const [bx, by, size] = box;
     const P = (u, v) => [(bx + size * u).toFixed(1), (by + size * v).toFixed(1)];
     const pt = (u, v) => P(u, v).join(" ");
-    const smoke = (u, v, dark) => [0, 1, 2].map(k => `<circle class="a3-smoke${dark ? " a3-dark" : ""}" style="animation-delay:${k}s" cx="${P(u, v)[0]}" cy="${P(u, v)[1]}" r="2.2"/>`).join("");
+    const smoke = (u, v, dark) => smoke3d(...P(u, v), dark);
     if (icon === "solar") {
       const quad = [P(.12, .48), P(.33, .18), P(.84, .31), P(.63, .64)].map(p => p.join(",")).join(" ");
       return `<clipPath id="deye-3d-pv-clip"><polygon points="${quad}"/></clipPath>
-        <circle class="a3-sun a3-day" cx="${P(.16, .16)[0]}" cy="${P(.16, .16)[1]}" r="6"/>
-        <g clip-path="url(#deye-3d-pv-clip)"><g transform="skewX(-28)"><rect class="a3-glint" x="${bx - 30}" y="${by}" width="7" height="${size}"/></g></g>`;
+        <circle class="a3-sun a3-day" cx="${P(.16, .16)[0]}" cy="${P(.16, .16)[1]}" r="6" filter="url(#deye-3d-soft)"/>
+        <g clip-path="url(#deye-3d-pv-clip)"><g transform="skewX(-28)"><rect class="a3-glint" x="${bx - 30}" y="${by}" width="7" height="${size}" filter="url(#deye-3d-soft)"/></g></g>`;
     }
-    if (icon === "grid") {
-      const left = [[.235, .327], [.279, .307], [.331, .287]], right = [[.666, .155], [.714, .136], [.762, .12]];
-      return left.map(([u, v], k) => {
-        const [u2, v2] = right[k];
-        return `<path class="a3-flow" d="M${pt(u, v)} Q${pt((u + u2) / 2, (v + v2) / 2 + .07)} ${pt(u2, v2)}"/>`;
-      }).join("");
-    }
+    if (icon === "grid") return "";
     if (icon === "battery") return [.339, .502, .666].flatMap((v, row) => [.307, .33, .352, .375].map((u, k) =>
-      `<circle class="a3-led" style="animation-delay:${(k * .25 + row * .08).toFixed(2)}s" cx="${P(u, v)[0]}" cy="${P(u, v)[1]}" r="1.1"/>`)).join("");
-    if (icon === "house") return smoke(.68, .13, false);
+      `<circle class="a3-led" style="animation-delay:${(k * .25 + row * .08).toFixed(2)}s" cx="${P(u, v)[0]}" cy="${P(u, v)[1]}" r="1.1" filter="url(#deye-3d-soft)"/>`)).join("");
+    if (icon === "house") return smoke(.678, .14, false);
     if (icon === "generator") return smoke(.865, .37, true);
     return "";
   }
@@ -854,10 +881,15 @@
       <title ${textAttributes(pair(english, label))}>${label}</title>
       <rect class="hit" fill-opacity="0" x="-54" y="-47" width="108" height="107" rx="4"/>
       <g class="look3d-only" aria-hidden="true">
-        <image class="bezel3d" x="-54.2" y="-55" width="108.9" height="108.9" data-src3d="bezel"/>
-        <path class="fill3d" fill="none" stroke="url(#deye-technika-power)"/>
-        <image class="obj3d" x="-37" y="-42" width="74" height="74" data-obj3d="${object3d[icon] ?? ""}"/>
-        <g class="anim3d">${anim3d(icon)}</g>
+        <g class="sep3d">
+          <image class="obj3d" x="-37" y="-42" width="74" height="74" data-obj3d="${object3d[icon] ?? ""}"/>
+          <g class="anim3d">${anim3d(icon)}</g>
+          ${icon === "grid" ? poleWires("pole_tile_", tileGridWires, (x, y) => [-37 + 74 * x / 1254, -42 + 74 * y / 1254], .55) : ""}
+        </g>
+        <path class="hud-track" d="${arc3d(1)}"/>
+        <path class="hud-glow" stroke="url(#deye-3d-hud)" filter="url(#deye-3d-glow)"/>
+        <path class="hud-edge"/>
+        <path class="hud-fill" stroke="url(#deye-3d-hud)"/>
       </g>
       <circle class="technika-only" r="36.65" fill="url(#deye-technika-face)" stroke="#f8f9e7" stroke-width=".55" stroke-opacity=".569" clip-path="url(#deye-technika-face-cut)" aria-hidden="true"/>
       <path class="technika-only" d="${track}" fill="none" stroke="#3e423e" stroke-width="9" stroke-linecap="round" aria-hidden="true"/>
@@ -2701,28 +2733,52 @@
     :host([data-look="3d"]) .gauge > .technika-only, :host([data-look="3d"]) .gauge > .track, :host([data-look="3d"]) .gauge > .fill,
     :host([data-look="3d"]) .gauge .symbol, :host([data-look="3d"]) .gen-icon,
     :host([data-look="3d"]) .screen .status, :host([data-look="3d"]) .screen .status-ring { display:none; }
-    :host([data-look="3d"]) .fill3d { stroke-width:4.4; filter:drop-shadow(0 0 1.6px rgba(255,214,90,.75)); }
-    :host([data-look="3d"]) .gauge .value, :host([data-look="3d"]) .gauge .unit, :host([data-look="3d"]) .gauge .scale { paint-order:stroke; stroke:rgba(0,0,0,.55); stroke-width:2.2px; stroke-linejoin:round; }
-    :host([data-look="3d"]) .gauge .soc { transform:translateY(44px); font-size:10px; paint-order:stroke; stroke:rgba(0,0,0,.6); stroke-width:2px; }
+    /* 0.8.36 · two 3D views: «Сцена» (one picture of the homestead) and «Окремо» (a picture in every gauge). */
+    :host([data-look="3d"][data-scene="scene"]) .sep3d, :host([data-look="3d"]:not([data-scene="scene"])) .scene3d { display:none; }
+    .hud-track { fill:none; stroke:rgba(10,20,15,.4); stroke-width:4.6; stroke-linecap:round; }
+    .hud-glow { fill:none; stroke-width:9.6; stroke-linecap:round; opacity:.9; }
+    .hud-edge { fill:none; stroke:rgba(27,33,32,.5); stroke-width:6.4; stroke-linecap:round; }
+    .hud-fill { fill:none; stroke-width:4.6; stroke-linecap:round; }
+    :host([data-look="3d"][data-appearance="light"]:not([data-scene="scene"])) .hud-track { stroke:rgba(40,50,45,.22); }
+    .hud-ring-bg { fill:rgba(10,20,15,.45); }
+    .hud-ring, .hud-ring-glow { fill:none; stroke:#7dff9c; }
+    .hud-ring { stroke-width:1.6; } .hud-ring-glow { stroke-width:3.5; opacity:.75; }
+    .screen[data-status="fault"] :is(.hud-ring, .hud-ring-glow) { stroke:#ff5a4c; }
+    .screen[data-status="missing"] :is(.hud-ring, .hud-ring-glow) { stroke:#9aa7a0; }
+    :host([data-look="3d"]) .gauge .value { font-size:19px; }
+    :host([data-look="3d"]) .gauge .unit { font-size:8.5px; transform:translateY(1.5px); }
+    :host([data-look="3d"]) .gauge .scale { font-size:12px; }
+    /* The charge sits outside the arc, top-left of the battery gauge, so it never meets the power number. */
+    :host([data-look="3d"]) .gauge .soc { transform:translate(-46px, -26px); font-size:11px; }
+    :host([data-look="3d"]) .parallel { fill:#eafff0; }
+    /* On the scene the texts are light with a soft shadow, whatever the light / dark look of the card. */
+    :host([data-look="3d"][data-scene="scene"]) .screen :is(.gauge .value, .gauge .unit, .gauge .scale, .gauge .soc, .gauge .soc-side, .generator-status, .generator-amount, .generator .unit) {
+      fill:#fff !important; paint-order:stroke; stroke:rgba(0,0,0,.38); stroke-width:2px; stroke-linejoin:round; }
+    :host([data-look="3d"][data-scene="scene"]) .screen .gauge .soc { fill:#9dffb8 !important; }
+    :host([data-look="3d"][data-scene="scene"]) .screen[data-battery-flow="discharge"] [data-gauge="battery_power"] .value { fill:#ffc078 !important; }
+    :host([data-look="3d"][data-scene="scene"]) .screen[data-battery-flow="charge"] [data-gauge="battery_power"] .value { fill:#8dffad !important; }
+    :host([data-look="3d"][data-scene="scene"]) .screen[data-grid-flow="export"] [data-gauge="grid_power"] .value { fill:#8fd4ff !important; }
+    :host([data-look="3d"][data-scene="scene"][data-night]) .top { fill:#e6eef8; }
+    .pole-wire .wire-track { stroke:none !important; fill:none; }
     :host([data-look="3d"]) .status-text { fill:#7dff9c; }
     :host([data-look="3d"]) .screen[data-status="fault"] .status-text { fill:#ff6a5c; }
     .anim3d { pointer-events:none; }
-    .gauge:not([data-active]) .anim3d, :host([data-motion="off"]) .anim3d { display:none; }
-    .a3-sun { fill:#fff3b0; opacity:.5; filter:blur(2px); animation:a3-pulse 3s ease-in-out infinite; }
+    .gauge:not([data-active]) .anim3d, :host([data-motion="off"]) :is(.anim3d, .scene3d-anim) { display:none; }
+    .a3-sun { fill:#fff3b0; opacity:.5; animation:a3-pulse 3s ease-in-out infinite; }
     :host([data-night]) .a3-day { display:none; }
-    .a3-glint { fill:#fff; opacity:.45; filter:blur(1.5px); animation:a3-glint 4.5s ease-in-out infinite; }
+    .a3-glint { fill:#fff; opacity:.4; animation:a3-glint 4.5s ease-in-out infinite; }
     .a3-flow { fill:none; stroke:#ffe66b; stroke-width:1.3; stroke-linecap:round; stroke-dasharray:2.5 7; filter:drop-shadow(0 0 1.2px #ffd23a); animation:a3-flow 1s linear infinite; }
     .screen[data-grid-flow="export"] .a3-flow { animation-direction:reverse; }
-    .a3-led { fill:#8dffad; filter:drop-shadow(0 0 1.4px #3dff7a); animation:a3-led 1.6s ease-in-out infinite; }
-    .a3-smoke { fill:#d9dde0; opacity:0; filter:blur(1.2px); transform-box:fill-box; transform-origin:center; animation:a3-smoke 3s ease-out infinite; }
+    .a3-led { fill:#8dffad; animation:a3-led 1.6s ease-in-out infinite; }
+    .a3-smoke { fill:#d9dde0; opacity:0; transform-box:fill-box; transform-origin:center; animation:a3-smoke 3s ease-out infinite; }
     .a3-smoke.a3-dark { fill:#7d8389; }
     :host([data-motion="on"]) .gen3d { animation:a3-vib .14s steps(2) infinite; }
-    @media (prefers-reduced-motion: reduce) { .anim3d { display:none; } .gen3d { animation:none !important; } }
+    @media (prefers-reduced-motion: reduce) { .anim3d, .scene3d-anim { display:none; } .gen3d { animation:none !important; } }
     @keyframes a3-pulse { 50% { opacity:.85; } }
     @keyframes a3-glint { 0% { transform:translateX(0); } 60%, 100% { transform:translateX(110px); } }
     @keyframes a3-flow { to { stroke-dashoffset:-9.5; } }
     @keyframes a3-led { 0%, 100% { opacity:.25; } 50% { opacity:1; } }
-    @keyframes a3-smoke { 0% { transform:translate(0,0) scale(.5); opacity:0; } 20% { opacity:.75; } 100% { transform:translate(5px,-16px) scale(2.4); opacity:0; } }
+    @keyframes a3-smoke { 0% { transform:translate(0,0) scale(.45); opacity:0; } 15% { opacity:.7; } 100% { transform:translate(2.5px,-13px) scale(2.2); opacity:0; } }
     @keyframes a3-vib { 50% { transform:translate(.35px,-.3px); } }
     .ap-note { grid-column:1 / -1; margin:0; padding:7px 9px; border-radius:8px; background:var(--ap-field); color:var(--ap-muted); font-size:12px; line-height:1.4; }
     .ap-workshop { display:flex; align-items:center; gap:14px; width:100%; margin:12px 0 2px; padding:9px 16px; border-radius:12px; cursor:pointer;
@@ -5005,7 +5061,20 @@ ${gridStyles}
             </linearGradient>
             <linearGradient id="deye-t-shine" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".45"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>
             <filter id="deye-t-glow" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="1.4"/></filter>
+            <!-- 0.8.36 · 3D theme: HUD colours and glows. Filter areas are set in user units with a wide margin,
+                 so a short arc is never clipped into a square. -->
+            <linearGradient id="deye-3d-hud" gradientUnits="userSpaceOnUse" x1="-41" y1="0" x2="41" y2="0">
+              <stop offset="0" stop-color="#1fff6a"/><stop offset=".5" stop-color="#ffe01a"/><stop offset="1" stop-color="#ff2d2d"/>
+            </linearGradient>
+            <filter id="deye-3d-glow" filterUnits="userSpaceOnUse" x="-70" y="-70" width="140" height="140"><feGaussianBlur stdDeviation="1.5"/></filter>
+            <filter id="deye-3d-ring-glow" filterUnits="userSpaceOnUse" x="150" y="90" width="104" height="104"><feGaussianBlur stdDeviation="1.6"/></filter>
+            <filter id="deye-3d-soft" filterUnits="userSpaceOnUse" x="-400" y="-400" width="1200" height="1100"><feGaussianBlur stdDeviation="1.1"/></filter>
           </defs>
+          <g class="look3d-only scene3d" aria-hidden="true">
+            <image class="scene3d-bg" x="0" y="0" width="400" height="268" preserveAspectRatio="xMidYMid slice" data-scene3d/>
+            ${poleWires("pole_scene_", sceneGridWires, scenePoint, .7)}
+            <g class="scene3d-anim">${smoke3d(...scenePoint(1328, 668).map(n => n.toFixed(1)), false)}</g>
+          </g>
           <g transform="translate(25 24)" class="appearance-trigger" role="button" tabindex="0" aria-haspopup="dialog" aria-expanded="false" aria-controls="appearance-dialog" ${textAttributes(pair("Card appearance", "Оформлення картки"), "label")} aria-label="Оформлення картки" data-open-appearance>
             <title ${textAttributes(pair("Card appearance", "Оформлення картки"))}>Оформлення картки</title>
             <rect class="hit" x="-22" y="-22" width="44" height="44" rx="6" fill="transparent"/>
@@ -5037,7 +5106,11 @@ ${gridStyles}
           ${wireLayout.map(wire).join("")}
           <circle class="status" cx="202" cy="142" r="25" fill="${screenWhite}"/>
           <circle class="technika-only status-ring" cx="202" cy="142" r="21.75" fill="none" stroke="#719482" stroke-width=".7" aria-hidden="true"/>
-          <image class="look3d-only ring3d" x="171.4" y="111.1" width="61.4" height="61.4" data-src3d="ring" aria-hidden="true"/>
+          <g class="look3d-only ring3d" aria-hidden="true">
+            <circle class="hud-ring-bg" cx="202" cy="142" r="24"/>
+            <circle class="hud-ring-glow" cx="202" cy="142" r="24" filter="url(#deye-3d-ring-glow)"/>
+            <circle class="hud-ring" cx="202" cy="142" r="24"/>
+          </g>
           <text class="parallel" x="202" y="135" data-parallel=""></text>
           <text class="status-text" x="202" y="148" data-status-label="">—</text>
           <g role="button" tabindex="0" aria-label="Про картку Deye LCD" ${textAttributes(pair("About Deye LCD", "Про картку Deye LCD"), "label")} aria-haspopup="dialog" aria-controls="about-dialog" data-open-about="">
@@ -5289,7 +5362,7 @@ ${gridStyles}
           this.settingsTitle.focus({ preventScroll: true });
         } else this.backFromSettings();
       });
-      this.wires = Object.fromEntries(wireLayout.map(({ name }) => [name, select(`[data-wire="${name}"]`)]));
+      this.wires = Object.fromEntries([...wireLayout.map(({ name }) => name), ...poleWireNames].map(name => [name, select(`[data-wire="${name}"]`)]));
       this.gauges = Object.fromEntries(gaugeLayout.map(({ key }) => {
         const element = select(`[data-gauge="${key}"]`);
         onActivate(element, () => this.openDetails(key));
@@ -5320,6 +5393,7 @@ ${gridStyles}
       // 3D is built on ТЕХНіКА (menus, flows, palette) and swaps the main-screen gauges for pictures.
       if (look === "3d" && !this.missing3dFiles) this.dataset.look = "3d"; else delete this.dataset.look;
       this.dataset.motion = this.visualConfig().lcd_motion === "off" ? "off" : "on";
+      this.dataset.scene = this.visualConfig().lcd_scene3d === "separate" ? "separate" : "scene";
       this.applyWorkshop();
       this.dataset.palette = this.visualConfig().lcd_palette === "graphite" ? "graphite" : "olive";
       this.dataset.frame = storedFrame();
@@ -5456,7 +5530,7 @@ ${gridStyles}
     getGridOptions() { return { columns: 12, min_columns: 6 }; }
 
     visualConfig() {
-      const base = { lcd_motion:"on", ...DeyeLcd.getStubConfig(), ...this.config, ...this.visualPreferences };
+      const base = { lcd_motion:"on", lcd_scene3d:"scene", ...DeyeLcd.getStubConfig(), ...this.config, ...this.visualPreferences };
       // The editor preview always shows КЛАСіК, light or black after Home Assistant.
       return this.editorPreview ? { ...base, lcd_theme:"classic", lcd_appearance:"auto", lcd_auto_source:"ha" } : base;
     }
@@ -5495,7 +5569,7 @@ ${gridStyles}
     }
 
     resetVisualPreferences() {
-      this.visualPreferences = { lcd_theme:"classic", lcd_palette:"olive", lcd_appearance:"auto", lcd_auto_source:"ha", lcd_particles:"dot", lcd_motion:"on" };
+      this.visualPreferences = { lcd_theme:"classic", lcd_palette:"olive", lcd_appearance:"auto", lcd_auto_source:"ha", lcd_particles:"dot", lcd_motion:"on", lcd_scene3d:"scene" };
       this.saveVisualPreferences();
     }
 
@@ -5637,6 +5711,7 @@ ${gridStyles}
         <div class="ap-grid">
           ${row("theme", t("Theme", "Тема"), button("lcd_theme", "classic", "КЛАСіК") + button("lcd_theme", "technika", "ТЕХНіКА") + button("lcd_theme", "3d", "3D"))}
           ${config.lcd_theme === "3d" && this.missing3dFiles ? `<p class="ap-note" role="status">${t("3D pictures were not found next to the card, so the usual gauges are shown. Update the card in the Marketplace (HACS) and reload the page.", "Картинки 3D не знайдено поруч із карткою, тому показано звичайні шкали. Оновіть картку в Магазині (HACS) і перезавантажте сторінку.")}</p>` : ""}
+          ${config.lcd_theme === "3d" && !this.missing3dFiles ? row("scene3d", t("3D view", "Режим 3D"), button("lcd_scene3d", "scene", t("Scene", "Сцена")) + button("lcd_scene3d", "separate", t("Separate", "Окремо"))) : ""}
           ${config.lcd_theme === "3d" && !this.missing3dFiles ? row("motion", t("Animation", "Анімація"), button("lcd_motion", "on", t("On", "Увімк.")) + button("lcd_motion", "off", t("Off", "Вимк."))) : ""}
           <span class="ap-label" id="ap-mode">${t("Look", "Вигляд")}</span>
           <div class="ap-seg ap-look" role="group" aria-labelledby="ap-mode">
@@ -6748,7 +6823,9 @@ ${gridStyles}
       fill.setAttribute("d", path);
       gloss?.setAttribute("d", path);
       const gauge = this.gauges[key];
-      (gauge.fill3d ??= gauge.element.querySelector(".fill3d"))?.setAttribute("d", fraction === 0 ? "" : arc3d(fraction));
+      gauge.hud ??= [...gauge.element.querySelectorAll(".hud-glow, .hud-edge, .hud-fill")];
+      const hud = fraction === 0 ? "" : arc3d(fraction);
+      for (const path of gauge.hud) path.setAttribute("d", hud);
       gauge.element.toggleAttribute("data-active", fraction > 0);
     }
 
@@ -6913,16 +6990,22 @@ ${gridStyles}
       // Pictures are only requested while the 3D theme is on; day or night follows sun.sun.
       if (this.dataset.look !== "3d") return;
       const night = this.hassData?.states?.["sun.sun"]?.state === "below_horizon";
-      if (!force && this.night3d === night) return;
+      const scene = this.dataset.scene === "scene";
+      if (!force && this.night3d === night && this.scene3d === scene) return;
       this.night3d = night;
+      this.scene3d = scene;
       this.toggleAttribute("data-night", night);
-      for (const image of this.screen.querySelectorAll("[data-obj3d], [data-src3d]")) {
+      for (const image of this.screen.querySelectorAll("[data-obj3d], [data-src3d], [data-scene3d]")) {
+        // Only the pictures of the chosen view are requested: the scene, or a picture in every gauge.
+        const inGauge = Boolean(image.closest(".sep3d"));
+        if (image.hasAttribute("data-scene3d") ? !scene : inGauge && scene) continue;
         if (!image.hasAttribute("data-watch3d")) {
           // A picture that cannot be loaded switches the card back to the usual ТЕХНіКА gauges instead of empty circles.
           image.setAttribute("data-watch3d", "");
           image.addEventListener("error", () => this.missing3d());
         }
-        if (image.dataset.obj3d) image.setAttribute("href", picture3d(image.dataset.obj3d, night));
+        if (image.hasAttribute("data-scene3d")) image.setAttribute("href", asset3d(`scene_${night ? "night" : "day"}_summer`));
+        else if (image.dataset.obj3d) image.setAttribute("href", picture3d(image.dataset.obj3d, night));
         else if (!image.getAttribute("href")) image.setAttribute("href", asset3d(image.dataset.src3d));
       }
     }
@@ -6959,6 +7042,13 @@ ${gridStyles}
       this.setFlow("solar", pv);
       this.wires.grid.toggleAttribute("data-disconnected", gridDisconnected);
       this.setFlow("grid", gridDisconnected ? null : grid);
+      // 0.8.36 · particles on the power-line wires of the 3D pictures follow the Grid line.
+      const poles = this.dataset.look === "3d" && this.dataset.motion !== "off" && !gridDisconnected ? grid : null;
+      const sceneView = this.dataset.scene === "scene";
+      for (let k = 0; k < 3; k++) {
+        this.setFlow(`pole_tile_${k}`, sceneView ? null : poles);
+        this.setFlow(`pole_scene_${k}`, sceneView ? poles : null);
+      }
       this.setFlow("battery", signed(battery, true));
       this.setFlow("load", load);
       // Meaning colours: after normalisation a negative battery power charges, a negative grid power exports.
