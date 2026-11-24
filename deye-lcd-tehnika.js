@@ -9,7 +9,7 @@
   const legacyCardTag = "deye-lcd-8k";
   if (customElements.get(cardTag)) return;
 
-  const version = "Alpha 0.8.37";
+  const version = "Alpha 0.8.38";
   const currentVersion = version.replace(/^[^\d]*/, "");
   const models = [3, 5, 6, 8, 10, 12, 15, 20, 30, 80, 160];
   const defaultModel = 8;
@@ -2824,7 +2824,7 @@
     :host([data-look="3d"][data-scene="scene"]) .screen[data-battery-flow="discharge"] [data-gauge="battery_power"] .value { fill:#ffc078 !important; }
     :host([data-look="3d"][data-scene="scene"]) .screen[data-battery-flow="charge"] [data-gauge="battery_power"] .value { fill:#8dffad !important; }
     :host([data-look="3d"][data-scene="scene"]) .screen[data-grid-flow="export"] [data-gauge="grid_power"] .value { fill:#8fd4ff !important; }
-    :host([data-look="3d"][data-scene="scene"][data-night]) .top { fill:#e6eef8; }
+    :host([data-look="3d"][data-scene="scene"][data-night]) .screen text.top { fill:#e6eef8; }
     .pole-wire .wire-track { stroke:none !important; fill:none; }
     :host([data-look="3d"]) .status-text { fill:#7dff9c; }
     :host([data-look="3d"]) .screen[data-status="fault"] .status-text { fill:#ff6a5c; }
@@ -5480,7 +5480,8 @@ ${gridStyles}
       this.parallelLabel.textContent = parallelId;
       this.statusLabel.setAttribute("y", parallelId ? "156" : "148");
       for (const { maximum, fill } of Object.values(this.gauges)) {
-        maximum.textContent = this.scale.toFixed(1);
+        // 0.8.38 · ТЕХНіКА and 3D show a whole maximum without «.0» (160, not 160.0); КЛАСіК keeps the original Deye «8.0».
+        maximum.textContent = technika && Number.isInteger(this.scale) ? String(this.scale) : this.scale.toFixed(1);
         // Both themes draw the fill as a stroke along the same arc as the track, so it starts exactly where the scale starts.
         fill.setAttribute("fill", "none");
         fill.setAttribute("stroke", technika ? "url(#deye-technika-power)" : "url(#deye-lcd-arc)");
