@@ -9,7 +9,7 @@
   const legacyCardTag = "deye-lcd-8k";
   if (customElements.get(cardTag)) return;
 
-  const version = "Alpha 0.8.34";
+  const version = "Alpha 0.8.35";
   const currentVersion = version.replace(/^[^\d]*/, "");
   const models = [3, 5, 6, 8, 10, 12, 15, 20, 30, 80, 160];
   const defaultModel = 8;
@@ -616,8 +616,9 @@
   }
 
   /* ── 0.8.33 · 3D theme: photo-like pictures + a live fill and a light animation layer ──
-   * 0.8.34 · the pictures lie next to the card file (3d-*.webp in the same folder, no subfolders):
-   * HACS / Marketplace copy the whole dist/ directory of the release there. Nothing is loaded from the internet. */
+   * 0.8.35 · the pictures lie next to the card file (3d-*.webp in the same folder, no subfolders): they are assets
+   * of the GitHub release, and the Marketplace (HACS) downloads every asset of the release into the card's folder.
+   * Nothing is loaded from the internet. */
   const assetBase = (() => { try { return new URL("./", import.meta.url).href; } catch { return "/hacsfiles/deye-lcd-tehnika/"; } })();
   const asset3d = (name) => `${assetBase}3d-${name}.webp?v=${encodeURIComponent(currentVersion)}`;
   const object3d = { solar:"sun", grid:"grid", battery:"battery", house:"house", generator:"generator" };

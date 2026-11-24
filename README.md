@@ -41,7 +41,7 @@
 
 ### Через HACS
 
-Картка встановлюється й оновлюється **лише через Магазин (HACS)**: разом із нею йдуть картинки 3D-теми (`dist/3d-*.webp`), і Магазин кладе їх поруч із карткою сам. Картинки вантажаться лише з вашого Home Assistant, без інтернету.
+Картка встановлюється й оновлюється **лише через Магазин (HACS)**: разом із нею у кожному релізі йдуть картинки 3D-теми (`3d-*.webp`), і Магазин кладе їх поруч із карткою сам. Картинки вантажаться лише з вашого Home Assistant, без інтернету.
 
 1. Відкрийте **HACS** → меню **⋮** угорі справа → **Custom repositories**.
 2. Вставте адресу `https://github.com/hrudkaav/deye-lcd-tehnika`, тип — **Dashboard**, натисніть **Add**.
@@ -106,4 +106,4 @@ inverter_status: sensor.deye_device_state
 
 ### In English
 
-**Deye · LCD ТЕХНіКА** is a Home Assistant card that mirrors the Deye hybrid inverter screen: power flow, battery, grid, load, generator, 24-hour history and the System Setup menus. Three themes (the original-looking КЛАСіК, the author's ТЕХНіКА and a photo-like 3D theme), light/dark/auto looks, Ukrainian and English UI. Licensed under CC BY-NC-SA 4.0. Install and update only via the Home Assistant Marketplace (HACS) as a custom **Dashboard** repository: the card file and the 3D-theme pictures come together from the `dist/` directory. Factory reset is never sent and grid settings are view-only; every settings change asks for confirmation.
+**Deye · LCD ТЕХНіКА** is a Home Assistant card that mirrors the Deye hybrid inverter screen: power flow, battery, grid, load, generator, 24-hour history and the System Setup menus. Three themes (the original-looking КЛАСіК, the author's ТЕХНіКА and a photo-like 3D theme), light/dark/auto looks, Ukrainian and English UI. Licensed under CC BY-NC-SA 4.0. Install and update only via the Home Assistant Marketplace (HACS) as a custom **Dashboard** repository: the card file and the 3D-theme pictures come together as assets of each release. Factory reset is never sent and grid settings are view-only; every settings change asks for confirmation.
