@@ -9,7 +9,7 @@
   const legacyCardTag = "deye-lcd-8k";
   if (customElements.get(cardTag)) return;
 
-  const version = "Alpha 0.8.38";
+  const version = "Alpha 0.8.39";
   const currentVersion = version.replace(/^[^\d]*/, "");
   const models = [3, 5, 6, 8, 10, 12, 15, 20, 30, 80, 160];
   const defaultModel = 8;
@@ -27,7 +27,13 @@
    * Entry format: { id:"sponsor-id", name:"Name or nickname", options:[{ id:"option-id", label:{ en:"…", uk:"…" }, note:{ en:"…", uk:"…" } }] }
    * An enabled option appears in the card's data-workshop attribute, so its styles and code can check it.
    */
-  const workshop = [];
+  const workshop = [
+    { id:"tg-group", name:"ТГ Група", options:[
+      { id:"battery-time", label:{ en:"Battery time", uk:"Час АКБ" },
+        note:{ en:"A clock on the main screen: green — to full charge, orange — to the cut-off, grey — if the grid goes down.",
+          uk:"Годинник на головному екрані: зелений — до повного заряду, помаранчевий — до порогу, сірий — якщо зникне мережа." } },
+    ] },
+  ];
   const workshopKey = "deye-lcd-tehnika:workshop";
   const storedWorkshop = () => { try { const value = JSON.parse(localStorage.getItem(workshopKey) || "{}"); return value && typeof value === "object" ? value : {}; } catch { return {}; } };
   const workshopOptionIds = new Set(workshop.flatMap(entry => entry.options.map(option => option.id)));
@@ -1737,13 +1743,24 @@
   }
 
   // 0.8.37 · Short battery time on the main screen: shown only while the battery charges or discharges.
+  // 0.8.39 · At rest it shows the time «if the grid goes down» from the house load, like the battery window.
   function mainRuntime(config, states, soc, power) {
     const capacity = batteryCapacityOf(config, states);
-    if (!capacity || soc === null || power === null || Math.abs(power) < idleThreshold(config)) return null;
+    const idle = idleThreshold(config);
+    if (!capacity || soc === null || power === null) return null;
+    const cutoff = runtimeCutoffOf(config, states);
+    if (Math.abs(power) < idle) {
+      const status = gridStatus(config, states, gridInverters(config, "grid"));
+      const gridPower = powerTotal(powerSources(config, gaugeByKey.grid_power), states);
+      const onGrid = status ? status.on > 0 : gridPower !== null && Math.abs(gridPower) >= idle;
+      const load = powerTotal(powerSources(config, gaugeByKey.load_power), states);
+      if (!onGrid || load === null || load < idle || soc <= cutoff) return null;
+      return { minutes:capacity.kwh * (soc - cutoff) / 100 / (load / 1000) * 60, dir:"idle" };
+    }
     const charging = power < 0;
-    const share = charging ? 100 - soc : soc - runtimeCutoffOf(config, states);
+    const share = charging ? 100 - soc : soc - cutoff;
     if (share <= 0) return null;
-    return { minutes:capacity.kwh * share / 100 / (Math.abs(power) / 1000) * 60, charging };
+    return { minutes:capacity.kwh * share / 100 / (Math.abs(power) / 1000) * 60, dir:charging ? "charge" : "discharge" };
   }
   function shortDuration(minutes, english) {
     const total = Math.max(1, Math.round(minutes)), h = Math.floor(total / 60), m = total % 60;
@@ -2793,6 +2810,9 @@
     :host([data-look="3d"]) .bat-time { transform:translate(var(--bt-shift, -17px), 24px); }
     :host([data-look="3d"]) .bat-time[data-dir="discharge"] { color:#ffc078; }
     :host([data-look="3d"]) .bat-time[data-dir="charge"] { color:#8dffad; }
+    .bat-time[data-dir="idle"] { color:#7d878c; }
+    :host([data-appearance="dark"]) .bat-time[data-dir="idle"], :host([data-theme="technika"]) .bat-time[data-dir="idle"] { color:#aeb6b2; }
+    :host([data-look="3d"]) .bat-time[data-dir="idle"] { color:#e2e8e4; }
     :host([data-look="3d"][data-scene="scene"]) .bat-time text { paint-order:stroke; stroke:rgba(0,0,0,.38); stroke-width:2px; stroke-linejoin:round; }
     /* 0.8.37 · No grid in 3D: a glowing red cross on the dotted grid line instead of the «Off grid» label. */
     :host([data-look="3d"]) .grid-outage .outage-legacy { display:none; }
@@ -5221,6 +5241,7 @@ ${gridStyles}
           if (enabled[id] === true) delete enabled[id]; else enabled[id] = true;
           try { localStorage.setItem(workshopKey, JSON.stringify(enabled)); } catch { /* this page only */ }
           this.applyWorkshop();
+          this.update();
           this.renderAppearance();
           this.appearanceDialog.querySelector(`[data-workshop-option="${CSS.escape(id)}"]`)?.focus({ preventScroll:true });
           return;
@@ -5715,7 +5736,7 @@ ${gridStyles}
       const head = (title) => `<div class="ws-head"><button type="button" class="ws-back" data-workshop-back aria-label="${t("Back", "Назад")}">‹</button><h3>${escapeHtml(title)}</h3></div>`;
       if (sponsor) return `${head(sponsor.name)}<div class="ws-list">${sponsor.options.map(option => `<button type="button" class="ws-option" data-workshop-option="${escapeHtml(option.id)}" role="switch" aria-checked="${enabled[option.id] === true}">
           <span><b>${text(option.label)}</b>${option.note ? `<small>${text(option.note)}</small>` : ""}</span><i aria-hidden="true"></i></button>`).join("")}</div>`;
-      return `${head(t("Workshop", "Майстерня"))}<p class="ws-intro">${t("Personal options made for the card's sponsors. Everything here is off by default.", "Персональні опції, зроблені для спонсорів картки. Усе тут вимкнено за замовчуванням.")}</p>
+      return `${head(t("Workshop", "Майстерня"))}<p class="ws-intro">${t("Personal options made at the request of sponsors and subscribers. Everything here is off by default.", "Персональні опції на побажання спонсорів і підписників. Усе тут вимкнено за замовчуванням.")}</p>
         <div class="ws-list">${workshop.length ? workshop.map(entry => {
           const count = entry.options.filter(option => enabled[option.id] === true).length;
           return `<button type="button" class="ws-sponsor" data-workshop-sponsor="${escapeHtml(entry.id)}"><b>${escapeHtml(entry.name)}</b><small>${count ? t(`${count} on`, `увімк.: ${count}`) : t(`${entry.options.length} options`, `опцій: ${entry.options.length}`)}</small><span aria-hidden="true">›</span></button>`;
@@ -7060,10 +7081,12 @@ ${gridStyles}
     updateBatteryTime(states, battery) {
       // 0.8.37 · «⏱ 2г 45хв»: time to 100 % while charging, to the cut-off while discharging; hidden at rest.
       if (!this.batTime) return;
-      const info = mainRuntime(this.config, states, this.runtimeSoc ?? null, battery);
+      // 0.8.39 · Only with «Т» → «Майстерня» → «ТГ Група» → «Час АКБ» switched on.
+      const on = (this.dataset.workshop || "").split(" ").includes("battery-time");
+      const info = on ? mainRuntime(this.config, states, this.runtimeSoc ?? null, battery) : null;
       this.batTime.toggleAttribute("hidden", !info);
       if (!info) { delete this.batTime.dataset.dir; return; }
-      this.batTime.dataset.dir = info.charging ? "charge" : "discharge";
+      this.batTime.dataset.dir = info.dir;
       const text = shortDuration(info.minutes, preferEnglish(this.config));
       if (this.batTimeText.textContent !== text) {
         this.batTimeText.textContent = text;
