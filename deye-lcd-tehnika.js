@@ -9,7 +9,7 @@
   const legacyCardTag = "deye-lcd-8k";
   if (customElements.get(cardTag)) return;
 
-  const version = "Alpha 0.8.36";
+  const version = "Alpha 0.8.37";
   const currentVersion = version.replace(/^[^\d]*/, "");
   const models = [3, 5, 6, 8, 10, 12, 15, 20, 30, 80, 160];
   const defaultModel = 8;
@@ -656,6 +656,8 @@
   // The scene (1536 × 1024 px) covers the card: 0.2617 units per pixel, 1 unit cut on each side.
   const sceneScale = 268 / 1024;
   const scenePoint = (x, y) => [-1 + x * sceneScale, y * sceneScale];
+  // 0.8.37 · Orange beacon on the repair truck cab (pictures with no grid).
+  const beacon3d = ([x, y], r) => `<g class="beacon3d" transform="translate(${x.toFixed(2)} ${y.toFixed(2)})"><circle class="bc-halo" r="${(r * 2.6).toFixed(2)}"/><circle class="bc-core" r="${r}"/></g>`;
   const sceneGridWires = [
     [["M", 1340, 280], ["Q", 1262, 340, 1186, 305], ["Q", 1095, 330, 1010, 354]],
     [["M", 1357, 284], ["Q", 1282, 348, 1204, 306], ["Q", 1105, 350, 1010, 376]],
@@ -885,11 +887,13 @@
           <image class="obj3d" x="-37" y="-42" width="74" height="74" data-obj3d="${object3d[icon] ?? ""}"/>
           <g class="anim3d">${anim3d(icon)}</g>
           ${icon === "grid" ? poleWires("pole_tile_", tileGridWires, (x, y) => [-37 + 74 * x / 1254, -42 + 74 * y / 1254], .55) : ""}
+          ${icon === "grid" ? beacon3d([-37 + 74 * 552 / 1254, -42 + 74 * 860 / 1254], .65) : ""}
         </g>
         <path class="hud-track" d="${arc3d(1)}"/>
         <path class="hud-glow" stroke="url(#deye-3d-hud)" filter="url(#deye-3d-glow)"/>
         <path class="hud-edge"/>
         <path class="hud-fill" stroke="url(#deye-3d-hud)"/>
+        <ellipse class="under3d" cx="0" cy="${isBattery ? 40 : 45}" rx="${isBattery ? 33 : 30}" ry="${isBattery ? 24 : 18}" fill="url(#deye-3d-under)"/>
       </g>
       <circle class="technika-only" r="36.65" fill="url(#deye-technika-face)" stroke="#f8f9e7" stroke-width=".55" stroke-opacity=".569" clip-path="url(#deye-technika-face-cut)" aria-hidden="true"/>
       <path class="technika-only" d="${track}" fill="none" stroke="#3e423e" stroke-width="9" stroke-linecap="round" aria-hidden="true"/>
@@ -901,7 +905,8 @@
         <g class="symbol" transform="translate(0 4) scale(1.45)">${dialIcon("dual")}</g>
         <text class="soc-side" x="-43" y="-33" data-soc-left="">—</text>
         <text class="soc-side" x="43" y="-33" data-soc-right="">—</text>
-      </g><text class="soc single-battery" x="0" y="-10" data-soc="">—</text>` : ""}
+      </g><text class="soc single-battery" x="0" y="-10" data-soc="">—</text>
+      <g class="bat-time" data-bat-time hidden aria-hidden="true"><g class="bat-clock"><circle r="3.4"/><path d="M0 -1.9V0L1.4 .9"/></g><text x="5.2" y="3.2" data-bat-time-text=""></text></g>` : ""}
       <text class="scale" x="-46" y="46" text-anchor="middle">0</text>
       <text class="scale" x="47" y="46" text-anchor="middle" data-scale="">${defaultModel.toFixed(1)}</text>
       <text class="value" x="0" y="46">—</text>
@@ -928,9 +933,16 @@
       <circle class="classic-only dot backward" r="2.8"><animateMotion dur="2s" path="${path}" repeatCount="indefinite" calcMode="linear" keyTimes="0;1" keyPoints="1;0"/></circle>
       <g class="technika-only flow-layer" aria-hidden="true"></g>
       ${name === "grid" ? `<g class="grid-outage" role="img" aria-label="Мережу від’єднано">
-        <text x="259" y="77">Off grid</text>
-        <path d="M254 102h10v13h-10z" fill="${screenWhite}"/>
-        <path d="M255 103l8 11m0-11-8 11" fill="none" stroke="currentColor" stroke-width="2.3"/>
+        <g class="outage-legacy">
+          <text x="259" y="77">Off grid</text>
+          <path d="M254 102h10v13h-10z" fill="${screenWhite}"/>
+          <path d="M255 103l8 11m0-11-8 11" fill="none" stroke="currentColor" stroke-width="2.3"/>
+        </g>
+        <g class="look3d-only outage-x" transform="translate(259 108.5)">
+          <g class="ox-pulse"><path d="M-4.5 -4.5 4.5 4.5M4.5 -4.5 -4.5 4.5"/></g>
+          <path class="ox-glow" d="M-4.5 -4.5 4.5 4.5M4.5 -4.5 -4.5 4.5" filter="url(#deye-3d-glow)"/>
+          <path class="ox-core" d="M-4.5 -4.5 4.5 4.5M4.5 -4.5 -4.5 4.5"/>
+        </g>
       </g>` : ""}
     </g>`;
   }
@@ -1722,6 +1734,23 @@
       note = t(`down to ${number(cutoff)} % · ${number(capacity.kwh)} kWh · at the current power`, `до ${number(cutoff)} % · ${number(capacity.kwh)} кВт·год · за поточною потужністю`);
     }
     return { label, value, note, charging:charging && value !== "—", capacity, cutoff };
+  }
+
+  // 0.8.37 · Short battery time on the main screen: shown only while the battery charges or discharges.
+  function mainRuntime(config, states, soc, power) {
+    const capacity = batteryCapacityOf(config, states);
+    if (!capacity || soc === null || power === null || Math.abs(power) < idleThreshold(config)) return null;
+    const charging = power < 0;
+    const share = charging ? 100 - soc : soc - runtimeCutoffOf(config, states);
+    if (share <= 0) return null;
+    return { minutes:capacity.kwh * share / 100 / (Math.abs(power) / 1000) * 60, charging };
+  }
+  function shortDuration(minutes, english) {
+    const total = Math.max(1, Math.round(minutes)), h = Math.floor(total / 60), m = total % 60;
+    if (h > 99) return english ? ">99h" : ">99г";
+    if (!h) return english ? `${m}m` : `${m}хв`;
+    if (!m) return english ? `${h}h` : `${h}г`;
+    return english ? `${h}h ${m}m` : `${h}г ${m}хв`;
   }
 
   const gridIcons = {
@@ -2745,9 +2774,46 @@
     .hud-ring { stroke-width:1.6; } .hud-ring-glow { stroke-width:3.5; opacity:.75; }
     .screen[data-status="fault"] :is(.hud-ring, .hud-ring-glow) { stroke:#ff5a4c; }
     .screen[data-status="missing"] :is(.hud-ring, .hud-ring-glow) { stroke:#9aa7a0; }
-    :host([data-look="3d"]) .gauge .value { font-size:19px; }
-    :host([data-look="3d"]) .gauge .unit { font-size:8.5px; transform:translateY(1.5px); }
-    :host([data-look="3d"]) .gauge .scale { font-size:12px; }
+    /* 0.8.37 · .screen raises the weight above the olive palette rules, so both palettes get the same 3D sizes. */
+    :host([data-look="3d"]) .screen .gauge .value { font-size:19px; }
+    :host([data-look="3d"]) .screen .gauge .unit { font-size:8.5px; transform:translateY(1.5px); }
+    :host([data-look="3d"]) .screen .gauge .scale { font-size:12px; }
+    .under3d { pointer-events:none; }
+    :host(:not([data-scene="scene"])) .under3d { display:none; }
+    /* 0.8.37 · Battery time «⏱ 2г 45хв»: inside the dial above the charge, in 3D above the power figures. */
+    .bat-time { transform:translate(var(--bt-shift, -17px), -29.5px); pointer-events:none; }
+    :host([data-theme="technika"]) .bat-time { transform:translate(var(--bt-shift, -17px), 26.5px); }
+    .bat-time[hidden] { display:none; }
+    .bat-time text { font-size:9px; font-weight:700; fill:currentColor; }
+    .bat-clock { fill:none; stroke:currentColor; stroke-width:1.1; stroke-linecap:round; transform:translateY(0); }
+    .bat-time[data-dir="charge"] { color:#229d56; }
+    .bat-time[data-dir="discharge"] { color:#d9822b; }
+    :host([data-appearance="dark"]) .bat-time[data-dir="discharge"], :host([data-theme="technika"]) .bat-time[data-dir="discharge"] { color:#ffb056; }
+    :host([data-appearance="dark"]) .bat-time[data-dir="charge"], :host([data-theme="technika"]) .bat-time[data-dir="charge"] { color:#57e389; }
+    :host([data-look="3d"]) .bat-time { transform:translate(var(--bt-shift, -17px), 24px); }
+    :host([data-look="3d"]) .bat-time[data-dir="discharge"] { color:#ffc078; }
+    :host([data-look="3d"]) .bat-time[data-dir="charge"] { color:#8dffad; }
+    :host([data-look="3d"][data-scene="scene"]) .bat-time text { paint-order:stroke; stroke:rgba(0,0,0,.38); stroke-width:2px; stroke-linejoin:round; }
+    /* 0.8.37 · No grid in 3D: a glowing red cross on the dotted grid line instead of the «Off grid» label. */
+    :host([data-look="3d"]) .grid-outage .outage-legacy { display:none; }
+    .outage-x path { fill:none; stroke-linecap:round; }
+    .outage-x .ox-core { stroke:#ff3b30; stroke-width:2.6; }
+    .outage-x .ox-glow { stroke:#ff2a1f; stroke-width:4.5; opacity:.8; }
+    .outage-x .ox-pulse path { stroke:#ff4b3e; stroke-width:2.6; }
+    .outage-x .ox-pulse { transform-box:fill-box; transform-origin:center; animation:ox-pulse 1.4s ease-out infinite; }
+    .outage-x .ox-core { animation:ox-glow 1.4s ease-in-out infinite; }
+    @keyframes ox-pulse { 0% { transform:scale(1); opacity:.75; } 100% { transform:scale(2.3); opacity:0; } }
+    @keyframes ox-glow { 0%, 100% { stroke:#ff3b30; } 50% { stroke:#ffb0a8; } }
+    :host([data-motion="off"]) .outage-x .ox-pulse { display:none; }
+    :host([data-motion="off"]) .outage-x .ox-core { animation:none; }
+    /* 0.8.37 · Beacon on the repair truck: only while there is no grid. */
+    .beacon3d { display:none; pointer-events:none; }
+    :host([data-grid-off]) .beacon3d { display:inline; }
+    .bc-halo { fill:#ffae2b; opacity:.45; filter:url(#deye-3d-soft); }
+    .bc-core { fill:#ffd36b; }
+    .beacon3d { animation:bc-blink 1s steps(1) infinite; }
+    @keyframes bc-blink { 0%, 55% { opacity:1; } 56%, 100% { opacity:.15; } }
+    :host([data-motion="off"]) .beacon3d { animation:none; }
     /* The charge sits outside the arc, top-left of the battery gauge, so it never meets the power number. */
     :host([data-look="3d"]) .gauge .soc { transform:translate(-46px, -26px); font-size:11px; }
     :host([data-look="3d"]) .parallel { fill:#eafff0; }
@@ -2781,12 +2847,12 @@
     @keyframes a3-smoke { 0% { transform:translate(0,0) scale(.45); opacity:0; } 15% { opacity:.7; } 100% { transform:translate(2.5px,-13px) scale(2.2); opacity:0; } }
     @keyframes a3-vib { 50% { transform:translate(.35px,-.3px); } }
     .ap-note { grid-column:1 / -1; margin:0; padding:7px 9px; border-radius:8px; background:var(--ap-field); color:var(--ap-muted); font-size:12px; line-height:1.4; }
-    .ap-workshop { display:flex; align-items:center; gap:14px; width:100%; margin:12px 0 2px; padding:9px 16px; border-radius:12px; cursor:pointer;
-      font:inherit; font-size:20px; font-weight:650; letter-spacing:2px; color:var(--ap-ink); background:linear-gradient(180deg,rgba(255,255,255,.08),rgba(0,0,0,.12)) var(--ap-field);
-      border:2px solid #9be36b; box-shadow:0 0 10px rgba(155,227,107,.55), inset 0 0 8px rgba(155,227,107,.18); }
-    .ap-workshop > span:last-child { flex:1; text-align:center; margin-right:34px; }
-    .ap-workshop-t { display:inline-grid; place-items:center; width:32px; height:32px; border-radius:50%; font-size:17px; letter-spacing:0; font-weight:800;
-      color:#2b2a10; background:radial-gradient(circle at 40% 35%,#f4e27a,#c9a92a); box-shadow:0 0 0 2px #e9d76a; }
+    .ap-workshop { display:flex; align-items:center; gap:8px; width:100%; min-height:38px; margin:10px 0 2px; padding:5px 10px; border-radius:10px; cursor:pointer;
+      font:inherit; font-size:13px; font-weight:650; letter-spacing:.6px; color:var(--ap-ink); background:var(--ap-field);
+      border:1.5px solid #9be36b; box-shadow:0 0 5px rgba(155,227,107,.35); }
+    .ap-workshop > span:last-child { flex:1; text-align:center; margin-right:22px; }
+    .ap-workshop-t { display:inline-grid; place-items:center; width:22px; height:22px; border-radius:50%; font-size:12px; letter-spacing:0; font-weight:800;
+      color:#2b2a10; background:radial-gradient(circle at 40% 35%,#f4e27a,#c9a92a); box-shadow:0 0 0 1.5px #e9d76a; }
     .ws-head { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
     .ws-head h3 { margin:0; font-size:16px; }
     .ws-back { width:34px; height:34px; border-radius:9px; border:0; background:var(--ap-field); color:var(--ap-ink); font-size:22px; line-height:1; cursor:pointer; }
@@ -5069,11 +5135,13 @@ ${gridStyles}
             <filter id="deye-3d-glow" filterUnits="userSpaceOnUse" x="-70" y="-70" width="140" height="140"><feGaussianBlur stdDeviation="1.5"/></filter>
             <filter id="deye-3d-ring-glow" filterUnits="userSpaceOnUse" x="150" y="90" width="104" height="104"><feGaussianBlur stdDeviation="1.6"/></filter>
             <filter id="deye-3d-soft" filterUnits="userSpaceOnUse" x="-400" y="-400" width="1200" height="1100"><feGaussianBlur stdDeviation="1.1"/></filter>
+            <radialGradient id="deye-3d-under"><stop offset="0" stop-color="#000" stop-opacity=".48"/><stop offset=".55" stop-color="#000" stop-opacity=".3"/><stop offset="1" stop-color="#000" stop-opacity="0"/></radialGradient>
           </defs>
           <g class="look3d-only scene3d" aria-hidden="true">
             <image class="scene3d-bg" x="0" y="0" width="400" height="268" preserveAspectRatio="xMidYMid slice" data-scene3d/>
             ${poleWires("pole_scene_", sceneGridWires, scenePoint, .7)}
             <g class="scene3d-anim">${smoke3d(...scenePoint(1328, 668).map(n => n.toFixed(1)), false)}</g>
+            ${beacon3d(scenePoint(1257, 390), .95)}
           </g>
           <g transform="translate(25 24)" class="appearance-trigger" role="button" tabindex="0" aria-haspopup="dialog" aria-expanded="false" aria-controls="appearance-dialog" ${textAttributes(pair("Card appearance", "Оформлення картки"), "label")} aria-label="Оформлення картки" data-open-appearance>
             <title ${textAttributes(pair("Card appearance", "Оформлення картки"))}>Оформлення картки</title>
@@ -5182,6 +5250,8 @@ ${gridStyles}
       this.statusSurface = select(".status");
       this.statusLabel = select("[data-status-label]");
       this.socLabel = select("[data-soc]");
+      this.batTime = select("[data-bat-time]");
+      this.batTimeText = select("[data-bat-time-text]");
       this.socLeft = select("[data-soc-left]");
       this.socRight = select("[data-soc-right]");
       this.parallelLabel = select("[data-parallel]");
@@ -6986,14 +7056,32 @@ ${gridStyles}
       }
     }
 
+    updateBatteryTime(states, battery) {
+      // 0.8.37 · «⏱ 2г 45хв»: time to 100 % while charging, to the cut-off while discharging; hidden at rest.
+      if (!this.batTime) return;
+      const info = mainRuntime(this.config, states, this.runtimeSoc ?? null, battery);
+      this.batTime.toggleAttribute("hidden", !info);
+      if (!info) { delete this.batTime.dataset.dir; return; }
+      this.batTime.dataset.dir = info.charging ? "charge" : "discharge";
+      const text = shortDuration(info.minutes, preferEnglish(this.config));
+      if (this.batTimeText.textContent !== text) {
+        this.batTimeText.textContent = text;
+        // Centre the clock and the text together under the gauge centre.
+        const width = this.batTimeText.getComputedTextLength?.() || text.length * 5;
+        this.batTime.style.setProperty("--bt-shift", `${-(width + 5.2 + 3.4) / 2 + 3.4}px`);
+      }
+    }
+
     update3d(force = false) {
       // Pictures are only requested while the 3D theme is on; day or night follows sun.sun.
       if (this.dataset.look !== "3d") return;
       const night = this.hassData?.states?.["sun.sun"]?.state === "below_horizon";
       const scene = this.dataset.scene === "scene";
-      if (!force && this.night3d === night && this.scene3d === scene) return;
+      const outage = Boolean(this.gridOff3d);
+      if (!force && this.night3d === night && this.scene3d === scene && this.outage3d === outage) return;
       this.night3d = night;
       this.scene3d = scene;
+      this.outage3d = outage;
       this.toggleAttribute("data-night", night);
       for (const image of this.screen.querySelectorAll("[data-obj3d], [data-src3d], [data-scene3d]")) {
         // Only the pictures of the chosen view are requested: the scene, or a picture in every gauge.
@@ -7004,7 +7092,9 @@ ${gridStyles}
           image.setAttribute("data-watch3d", "");
           image.addEventListener("error", () => this.missing3d());
         }
-        if (image.hasAttribute("data-scene3d")) image.setAttribute("href", asset3d(`scene_${night ? "night" : "day"}_summer`));
+        // 0.8.37 · No grid: the scene and the grid picture show the repair crew at the poles.
+        if (image.hasAttribute("data-scene3d")) image.setAttribute("href", asset3d(`scene_${night ? "night" : "day"}_summer${outage ? "_outage" : ""}`));
+        else if (image.dataset.obj3d === "grid" && outage) image.setAttribute("href", asset3d(`grid_${night ? "night" : "day"}_summer_outage`));
         else if (image.dataset.obj3d) image.setAttribute("href", picture3d(image.dataset.obj3d, night));
         else if (!image.getAttribute("href")) image.setAttribute("href", asset3d(image.dataset.src3d));
       }
@@ -7039,6 +7129,10 @@ ${gridStyles}
       this.setGauge("load_power", load);
       this.setGauge("pv_power", pv);
       this.updateCharge(states);
+      this.updateBatteryTime(states, battery);
+      this.toggleAttribute("data-grid-off", gridDisconnected);
+      this.gridOff3d = gridDisconnected;
+      this.update3d();
       this.setFlow("solar", pv);
       this.wires.grid.toggleAttribute("data-disconnected", gridDisconnected);
       this.setFlow("grid", gridDisconnected ? null : grid);
