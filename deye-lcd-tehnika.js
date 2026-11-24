@@ -9,17 +9,28 @@
   const legacyCardTag = "deye-lcd-8k";
   if (customElements.get(cardTag)) return;
 
-  const version = "Alpha 0.8.32";
+  const version = "Alpha 0.8.33";
   const currentVersion = version.replace(/^[^\d]*/, "");
   const models = [3, 5, 6, 8, 10, 12, 15, 20, 30, 80, 160];
   const defaultModel = 8;
   const themes = [
     { value: "classic", label: "КЛАСіК" },
     { value: "technika", label: "ТЕХНіКА" },
+    { value: "3d", label: "3D" },
   ];
   const manualAppearances = ["light", "dark"];
-  const visualValues = { lcd_theme:["classic","technika"], lcd_palette:["olive","graphite"],
+  const visualValues = { lcd_motion:["on","off"], lcd_theme:["classic","technika","3d"], lcd_palette:["olive","graphite"],
     lcd_appearance:["light","dark","auto"], lcd_auto_source:["ha","sun","device"], lcd_particles:["dot","glow","packet"] };
+  /*
+   * 0.8.33 · «Майстерня»: personal options ordered by the card's sponsors. They are not for everyone,
+   * so every option is OFF by default and only switched on by the user in «Т» → «Майстерня».
+   * Entry format: { id:"sponsor-id", name:"Name or nickname", options:[{ id:"option-id", label:{ en:"…", uk:"…" }, note:{ en:"…", uk:"…" } }] }
+   * An enabled option appears in the card's data-workshop attribute, so its styles and code can check it.
+   */
+  const workshop = [];
+  const workshopKey = "deye-lcd-tehnika:workshop";
+  const storedWorkshop = () => { try { const value = JSON.parse(localStorage.getItem(workshopKey) || "{}"); return value && typeof value === "object" ? value : {}; } catch { return {}; } };
+  const workshopOptionIds = new Set(workshop.flatMap(entry => entry.options.map(option => option.id)));
   // One language switch for the card and its editor: the flags in «Т» and the editor field write the same browser value.
   const languageKey = "deye-lcd-tehnika:language";
   const languageEvent = "deye-lcd-tehnika-language";
@@ -604,6 +615,43 @@
     return [radius * Math.cos(radians), radius * Math.sin(radians)].map(n => n.toFixed(3)).join(" ");
   }
 
+  /* ── 0.8.33 · 3D theme: photo-like pictures (separate files next to the card) + a live fill and a light animation layer ── */
+  const assetBase = (() => { try { return new URL("./img/3d/", import.meta.url).href; } catch { return "/hacsfiles/deye-lcd-tehnika/img/3d/"; } })();
+  const asset3d = (name) => `${assetBase}${name}.webp?v=${encodeURIComponent(currentVersion)}`;
+  const object3d = { solar:"sun", grid:"grid", battery:"battery", house:"house", generator:"generator" };
+  const seasonal3d = new Set(["sun", "grid", "house"]);
+  const picture3d = (object, night) => asset3d(seasonal3d.has(object) ? `${object}_${night ? "night" : "day"}_summer` : `${object}_${night ? "night" : "day"}`);
+  // The bezel picture's groove is a 245° arc; the live fill follows exactly that arc.
+  const bezelStart = 147.5, bezelSweep = 245;
+  function arc3d(fraction) {
+    const end = bezelStart + fraction * bezelSweep;
+    return `M${gaugePoint(gaugeRadius, bezelStart)} A${gaugeRadius} ${gaugeRadius} 0 ${fraction * bezelSweep > 180 ? 1 : 0} 1 ${gaugePoint(gaugeRadius, end)}`;
+  }
+  function anim3d(icon, box = [-37, -42, 74]) {
+    const [bx, by, size] = box;
+    const P = (u, v) => [(bx + size * u).toFixed(1), (by + size * v).toFixed(1)];
+    const pt = (u, v) => P(u, v).join(" ");
+    const smoke = (u, v, dark) => [0, 1, 2].map(k => `<circle class="a3-smoke${dark ? " a3-dark" : ""}" style="animation-delay:${k}s" cx="${P(u, v)[0]}" cy="${P(u, v)[1]}" r="2.2"/>`).join("");
+    if (icon === "solar") {
+      const quad = [P(.12, .48), P(.33, .18), P(.84, .31), P(.63, .64)].map(p => p.join(",")).join(" ");
+      return `<clipPath id="deye-3d-pv-clip"><polygon points="${quad}"/></clipPath>
+        <circle class="a3-sun a3-day" cx="${P(.16, .16)[0]}" cy="${P(.16, .16)[1]}" r="6"/>
+        <g clip-path="url(#deye-3d-pv-clip)"><g transform="skewX(-28)"><rect class="a3-glint" x="${bx - 30}" y="${by}" width="7" height="${size}"/></g></g>`;
+    }
+    if (icon === "grid") {
+      const left = [[.235, .327], [.279, .307], [.331, .287]], right = [[.666, .155], [.714, .136], [.762, .12]];
+      return left.map(([u, v], k) => {
+        const [u2, v2] = right[k];
+        return `<path class="a3-flow" d="M${pt(u, v)} Q${pt((u + u2) / 2, (v + v2) / 2 + .07)} ${pt(u2, v2)}"/>`;
+      }).join("");
+    }
+    if (icon === "battery") return [.339, .502, .666].flatMap((v, row) => [.307, .33, .352, .375].map((u, k) =>
+      `<circle class="a3-led" style="animation-delay:${(k * .25 + row * .08).toFixed(2)}s" cx="${P(u, v)[0]}" cy="${P(u, v)[1]}" r="1.1"/>`)).join("");
+    if (icon === "house") return smoke(.68, .13, false);
+    if (icon === "generator") return smoke(.865, .37, true);
+    return "";
+  }
+
   function arc(from, to) {
     const start = gaugeStart + from * gaugeSweep;
     const end = gaugeStart + to * gaugeSweep;
@@ -782,7 +830,8 @@
       <text class="generator-status" x="171" y="198" ${textAttributes(pair("on", "увімк."))}>увімк.</text>
       <text class="generator-amount" x="227" y="185" data-generator-power>—</text>
       <text class="unit" x="227" y="198">KW</text>
-      <g transform="translate(178.4 204.6) scale(.3495)">${generatorIcon}</g>
+      <g class="gen-icon" transform="translate(178.4 204.6) scale(.3495)">${generatorIcon}</g>
+      <g class="look3d-only" aria-hidden="true"><image class="obj3d gen3d" x="168" y="190" width="58" height="58" data-obj3d="generator"/><g class="anim3d">${anim3d("generator", [168, 190, 58])}</g></g>
       <rect class="hit" x="151" y="169" width="93" height="91" rx="5" fill="transparent"/>
     </g>`;
   }
@@ -801,6 +850,12 @@
     return `<g class="gauge" data-gauge="${key}" transform="translate(${x} ${y})" role="button" tabindex="0" aria-label="${label}" ${textAttributes(pair(english, label), "label")} aria-controls="details-screen">
       <title ${textAttributes(pair(english, label))}>${label}</title>
       <rect class="hit" fill-opacity="0" x="-54" y="-47" width="108" height="107" rx="4"/>
+      <g class="look3d-only" aria-hidden="true">
+        <image class="bezel3d" x="-54.2" y="-55" width="108.9" height="108.9" data-src3d="bezel"/>
+        <path class="fill3d" fill="none" stroke="url(#deye-technika-power)"/>
+        <image class="obj3d" x="-37" y="-42" width="74" height="74" data-obj3d="${object3d[icon] ?? ""}"/>
+        <g class="anim3d">${anim3d(icon)}</g>
+      </g>
       <circle class="technika-only" r="36.65" fill="url(#deye-technika-face)" stroke="#f8f9e7" stroke-width=".55" stroke-opacity=".569" clip-path="url(#deye-technika-face-cut)" aria-hidden="true"/>
       <path class="technika-only" d="${track}" fill="none" stroke="#3e423e" stroke-width="9" stroke-linecap="round" aria-hidden="true"/>
       <path class="track" d="${track}"/>
@@ -903,7 +958,11 @@
       <section class="details-history" aria-labelledby="details-history-title">
         <div class="details-history-head">
           <h3 id="details-history-title">Потужність за 24 год</h3>
-          <button type="button" class="details-back details-history-toggle" data-history-toggle aria-pressed="false" hidden>${translated(pair("Individual", "Окремо"))}</button>
+          <div class="details-history-tools">
+            <button type="button" class="details-back details-history-toggle" data-history-reset hidden></button>
+            <button type="button" class="details-back details-history-toggle" data-history-month aria-pressed="false">${translated(pair("Month", "Місяць"))}</button>
+            <button type="button" class="details-back details-history-toggle" data-history-toggle aria-pressed="false" hidden>${translated(pair("Individual", "Окремо"))}</button>
+          </div>
         </div>
         <p class="history-message" role="status"></p>
         <div class="history-chart" hidden></div>
@@ -968,9 +1027,18 @@
     return samples;
   }
 
-  function historyPlot(points, start, end, zone, english = false) {
+  function historyPlot(points, fullStart, fullEnd, zone, english = false, view = null) {
     const left = 45, right = 379, top = 16, bottom = 121;
-    const samples = plotSamples(points, start, end, right - left);
+    // 0.8.33 · zoom: only the visible window is sampled, so a short window shows every recorded change (down to seconds).
+    const start = view?.start ?? fullStart, end = view?.end ?? fullEnd;
+    let before = null;
+    const visible = [];
+    for (const point of points) {
+      if (point.time <= start) before = point;
+      else if (point.time <= end) visible.push(point);
+    }
+    if (before) visible.unshift({ ...before, time:start });
+    const samples = plotSamples(visible, start, end, right - left);
     let low = 0, high = 0;
     for (const { value } of samples) {
       if (value === null) continue;
@@ -984,7 +1052,8 @@
     const lowTick = Math.floor(low / step), highTick = Math.ceil(high / step);
     const x = (time) => (left + (time - start) * (right - left) / (end - start)).toFixed(1);
     const y = (value) => (bottom - (value / step - lowTick) * (bottom - top) / (highTick - lowTick)).toFixed(1);
-    const formatTime = dateFormatter(english ? "en-GB" : "uk-UA", { hour: "2-digit", minute: "2-digit", hourCycle: "h23" }, zone);
+    const seconds = end - start <= 15 * 60 * 1000;
+    const formatTime = dateFormatter(english ? "en-GB" : "uk-UA", { hour: "2-digit", minute: "2-digit", ...(seconds ? { second:"2-digit" } : {}), hourCycle: "h23" }, zone);
     const horizontal = Array.from({ length: highTick - lowTick + 1 }, (_, index) => {
       const tick = lowTick + index;
       const value = tick * step;
@@ -1007,11 +1076,38 @@
       previous = value;
     }
     if (previous !== null) trace.push(`H${right}`);
-    return `<svg viewBox="0 0 390 150" role="img" aria-label="${english ? "Power over the past 24 hours in kW" : "Графік потужності за останні 24 години у кіловатах"}">
+    return `<svg viewBox="0 0 390 150" role="img" data-history-plot aria-label="${english ? "Power over the past 24 hours in kW" : "Графік потужності за останні 24 години у кіловатах"}">
       <text x="4" y="9">${english ? "kW" : "кВт"}</text>
       ${horizontal}${vertical}
       <path class="history-trace" d="${trace.join(" ")}"/>
     </svg>`;
+  }
+
+  /* 0.8.33 · month view: one group of bars per day (solar / load / grid), from Home Assistant long-term statistics. */
+  function monthPlot(days, series, english = false) {
+    const left = 34, right = 382, top = 22, bottom = 121;
+    const high = Math.max(1, ...series.flatMap(item => item.values.filter(Number.isFinite)));
+    const interval = high / 3;
+    const magnitude = 10 ** Math.floor(Math.log10(interval));
+    const step = [1, 2, 2.5, 5, 10].find(size => interval <= size * magnitude) * magnitude;
+    const ticks = Math.ceil(high / step);
+    const y = (value) => (bottom - value * (bottom - top) / (ticks * step)).toFixed(1);
+    const slot = (right - left) / days.length;
+    const bar = Math.max(1, (slot - 1.6) / series.length);
+    const format = (value) => english ? chartFormat.format(value).replace(",", ".") : chartFormat.format(value);
+    const rules = Array.from({ length:ticks + 1 }, (_, k) => `<path class="history-rule${k ? "" : " history-zero"}" d="M${left} ${y(k * step)}H${right}"/>
+      <text x="${left - 4}" y="${y(k * step)}" dy=".34em" text-anchor="end">${format(k * step)}</text>`).join("");
+    const bars = days.map((day, d) => series.map((item, k) => {
+      const value = item.values[d];
+      if (!Number.isFinite(value) || value <= 0) return "";
+      const x = left + d * slot + .8 + k * bar;
+      return `<rect class="month-bar month-${item.key}" x="${x.toFixed(1)}" y="${y(value)}" width="${(bar - .3).toFixed(2)}" height="${(bottom - y(value)).toFixed(1)}"><title>${escapeHtml(`${day.label} · ${item.label}: ${format(Math.round(value * 10) / 10)} ${english ? "kWh" : "кВт·год"}`)}</title></rect>`;
+    }).join("")).join("");
+    const labels = days.map((day, d) => d % 5 === 0 || d === days.length - 1
+      ? `<text x="${(left + (d + .5) * slot).toFixed(1)}" y="140" text-anchor="middle">${escapeHtml(day.short)}</text>` : "").join("");
+    const legend = series.map((item, k) => `<rect class="month-bar month-${item.key}" x="${120 + k * 88}" y="3" width="9" height="9" rx="1.5"/><text x="${133 + k * 88}" y="11">${escapeHtml(item.label)}</text>`).join("");
+    return `<svg viewBox="0 0 390 150" role="img" aria-label="${english ? "Energy per day over the last 30 days, kWh" : "Енергія по днях за останні 30 днів, кВт·год"}">
+      <text x="4" y="11">${english ? "kWh" : "кВт·год"}</text>${legend}${rules}${bars}${labels}</svg>`;
   }
 
   const escapeHtml = (value) => String(value).replace(/[&<>"']/g, char =>
@@ -2081,6 +2177,11 @@
     .numeric-entry:focus-within { outline:2px solid var(--lcd-selected); outline-offset:-2px; }
     .numeric-entry input:focus-visible { outline:0; }
     .details-history-head { display:flex; justify-content:space-between; align-items:center; gap:6px; }
+    .details-history-tools { display:flex; flex-wrap:wrap; justify-content:flex-end; align-items:center; }
+    .history-chart { touch-action:pan-y; user-select:none; -webkit-user-select:none; }
+    .history-chart[data-zoomed] { cursor:grab; }
+    .month-bar { stroke:none; }
+    .month-pv { fill:#f2b632; } .month-load { fill:#5aa6e8; } .month-grid { fill:#c06cde; }
     .details-history-toggle { margin:4px; min-height:32px; padding:3px 8px; font:inherit; font-size:.88em; width:auto; cursor:pointer; }
     .history-part { padding-block-start:4px; border-top:1px solid var(--details-rule); }
     .history-part h4 { margin:3px 8px; font-size:clamp(11px,3.2cqi,16px); }
@@ -2592,6 +2693,54 @@
     .ap-swatches button[aria-pressed="true"] { box-shadow:0 0 0 2px var(--ap-active); }
     .ap-swatches [data-visual-value="olive"] { background:#566b39; }
     .ap-swatches [data-visual-value="graphite"] { background:#42494d; }
+    .look3d-only { display:none; }
+    :host([data-look="3d"]) .look3d-only { display:inline; }
+    :host([data-look="3d"]) .gauge > .technika-only, :host([data-look="3d"]) .gauge > .track, :host([data-look="3d"]) .gauge > .fill,
+    :host([data-look="3d"]) .gauge .symbol, :host([data-look="3d"]) .gen-icon,
+    :host([data-look="3d"]) .screen .status, :host([data-look="3d"]) .screen .status-ring { display:none; }
+    :host([data-look="3d"]) .fill3d { stroke-width:4.4; filter:drop-shadow(0 0 1.6px rgba(255,214,90,.75)); }
+    :host([data-look="3d"]) .gauge .value, :host([data-look="3d"]) .gauge .unit, :host([data-look="3d"]) .gauge .scale { paint-order:stroke; stroke:rgba(0,0,0,.55); stroke-width:2.2px; stroke-linejoin:round; }
+    :host([data-look="3d"]) .gauge .soc { transform:translateY(44px); font-size:10px; paint-order:stroke; stroke:rgba(0,0,0,.6); stroke-width:2px; }
+    :host([data-look="3d"]) .status-text { fill:#7dff9c; }
+    :host([data-look="3d"]) .screen[data-status="fault"] .status-text { fill:#ff6a5c; }
+    .anim3d { pointer-events:none; }
+    .gauge:not([data-active]) .anim3d, :host([data-motion="off"]) .anim3d { display:none; }
+    .a3-sun { fill:#fff3b0; opacity:.5; filter:blur(2px); animation:a3-pulse 3s ease-in-out infinite; }
+    :host([data-night]) .a3-day { display:none; }
+    .a3-glint { fill:#fff; opacity:.45; filter:blur(1.5px); animation:a3-glint 4.5s ease-in-out infinite; }
+    .a3-flow { fill:none; stroke:#ffe66b; stroke-width:1.3; stroke-linecap:round; stroke-dasharray:2.5 7; filter:drop-shadow(0 0 1.2px #ffd23a); animation:a3-flow 1s linear infinite; }
+    .screen[data-grid-flow="export"] .a3-flow { animation-direction:reverse; }
+    .a3-led { fill:#8dffad; filter:drop-shadow(0 0 1.4px #3dff7a); animation:a3-led 1.6s ease-in-out infinite; }
+    .a3-smoke { fill:#d9dde0; opacity:0; filter:blur(1.2px); transform-box:fill-box; transform-origin:center; animation:a3-smoke 3s ease-out infinite; }
+    .a3-smoke.a3-dark { fill:#7d8389; }
+    :host([data-motion="on"]) .gen3d { animation:a3-vib .14s steps(2) infinite; }
+    @media (prefers-reduced-motion: reduce) { .anim3d { display:none; } .gen3d { animation:none !important; } }
+    @keyframes a3-pulse { 50% { opacity:.85; } }
+    @keyframes a3-glint { 0% { transform:translateX(0); } 60%, 100% { transform:translateX(110px); } }
+    @keyframes a3-flow { to { stroke-dashoffset:-9.5; } }
+    @keyframes a3-led { 0%, 100% { opacity:.25; } 50% { opacity:1; } }
+    @keyframes a3-smoke { 0% { transform:translate(0,0) scale(.5); opacity:0; } 20% { opacity:.75; } 100% { transform:translate(5px,-16px) scale(2.4); opacity:0; } }
+    @keyframes a3-vib { 50% { transform:translate(.35px,-.3px); } }
+    .ap-workshop { display:flex; align-items:center; gap:14px; width:100%; margin:12px 0 2px; padding:9px 16px; border-radius:12px; cursor:pointer;
+      font:inherit; font-size:20px; font-weight:650; letter-spacing:2px; color:var(--ap-ink); background:linear-gradient(180deg,rgba(255,255,255,.08),rgba(0,0,0,.12)) var(--ap-field);
+      border:2px solid #9be36b; box-shadow:0 0 10px rgba(155,227,107,.55), inset 0 0 8px rgba(155,227,107,.18); }
+    .ap-workshop > span:last-child { flex:1; text-align:center; margin-right:34px; }
+    .ap-workshop-t { display:inline-grid; place-items:center; width:32px; height:32px; border-radius:50%; font-size:17px; letter-spacing:0; font-weight:800;
+      color:#2b2a10; background:radial-gradient(circle at 40% 35%,#f4e27a,#c9a92a); box-shadow:0 0 0 2px #e9d76a; }
+    .ws-head { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
+    .ws-head h3 { margin:0; font-size:16px; }
+    .ws-back { width:34px; height:34px; border-radius:9px; border:0; background:var(--ap-field); color:var(--ap-ink); font-size:22px; line-height:1; cursor:pointer; }
+    .ws-intro, .ws-empty { margin:4px 2px 10px; font-size:12.5px; color:var(--ap-muted); line-height:1.4; }
+    .ws-list { display:grid; gap:6px; }
+    .ws-sponsor, .ws-option { display:flex; align-items:center; gap:10px; width:100%; padding:10px 12px; border:0; border-radius:10px; background:var(--ap-field); color:var(--ap-ink); font:inherit; text-align:left; cursor:pointer; }
+    .ws-sponsor b, .ws-option b { display:block; font-size:14px; }
+    .ws-sponsor small, .ws-option small { display:block; font-size:11.5px; color:var(--ap-muted); }
+    .ws-sponsor b { flex:1; } .ws-sponsor > span { font-size:20px; color:var(--ap-muted); }
+    .ws-option > span { flex:1; }
+    .ws-option i { flex:none; width:38px; height:22px; border-radius:11px; background:var(--ap-edge); position:relative; transition:background .2s; }
+    .ws-option i::after { content:""; position:absolute; top:3px; left:3px; width:16px; height:16px; border-radius:50%; background:#fff; transition:transform .2s; }
+    .ws-option[aria-checked="true"] i { background:var(--ap-active); }
+    .ws-option[aria-checked="true"] i::after { transform:translateX(16px); }
     .ap-footer { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-top:10px; padding-top:8px; border-top:1px solid var(--ap-edge); }
     .ap-footer p { margin:0; font-size:12px; color:var(--ap-muted); }
     .ap-footer button {
@@ -4884,6 +5033,7 @@ ${gridStyles}
           ${wireLayout.map(wire).join("")}
           <circle class="status" cx="202" cy="142" r="25" fill="${screenWhite}"/>
           <circle class="technika-only status-ring" cx="202" cy="142" r="21.75" fill="none" stroke="#719482" stroke-width=".7" aria-hidden="true"/>
+          <image class="look3d-only ring3d" x="171.4" y="111.1" width="61.4" height="61.4" data-src3d="ring" aria-hidden="true"/>
           <text class="parallel" x="202" y="135" data-parallel=""></text>
           <text class="status-text" x="202" y="148" data-status-label="">—</text>
           <g role="button" tabindex="0" aria-label="Про картку Deye LCD" ${textAttributes(pair("About Deye LCD", "Про картку Deye LCD"), "label")} aria-haspopup="dialog" aria-controls="about-dialog" data-open-about="">
@@ -4913,6 +5063,23 @@ ${gridStyles}
       });
       this.appearanceDialog.addEventListener("click", event => {
         const button = event.target.closest("button");
+        if (button?.dataset.workshopOpen !== undefined) { this.workshopView = "list"; this.renderAppearance(); this.appearanceDialog.querySelector("[data-workshop-back]")?.focus({ preventScroll:true }); return; }
+        if (button?.dataset.workshopBack !== undefined) {
+          this.workshopView = this.workshopView === "list" ? null : "list";
+          this.renderAppearance();
+          this.appearanceDialog.querySelector(this.workshopView ? "[data-workshop-back]" : "[data-workshop-open]")?.focus({ preventScroll:true });
+          return;
+        }
+        if (button?.dataset.workshopSponsor) { this.workshopView = button.dataset.workshopSponsor; this.renderAppearance(); this.appearanceDialog.querySelector("[data-workshop-back]")?.focus({ preventScroll:true }); return; }
+        if (button?.dataset.workshopOption) {
+          const id = button.dataset.workshopOption, enabled = storedWorkshop();
+          if (enabled[id] === true) delete enabled[id]; else enabled[id] = true;
+          try { localStorage.setItem(workshopKey, JSON.stringify(enabled)); } catch { /* this page only */ }
+          this.applyWorkshop();
+          this.renderAppearance();
+          this.appearanceDialog.querySelector(`[data-workshop-option="${CSS.escape(id)}"]`)?.focus({ preventScroll:true });
+          return;
+        }
         if (button?.dataset.frameToggle) {
           storeFrame(button.dataset.frameToggle);
           this.appearanceDialog.querySelector(`[data-frame-toggle="${button.dataset.frameToggle}"]`)?.focus({ preventScroll:true });
@@ -4964,6 +5131,16 @@ ${gridStyles}
       this.historyHeading = select("#details-history-title");
       this.historyToggle = select("[data-history-toggle]");
       this.historyToggle.addEventListener("click", () => this.setDetailsSplit(!this.detailsSplit));
+      this.historyMonth = select("[data-history-month]");
+      this.historyReset = select("[data-history-reset]");
+      this.historyMonth.addEventListener("click", () => {
+        this.historyMode = this.historyMode === "month" ? "day" : "month";
+        this.chartView = null;
+        this.updateDetails();
+        this.loadDetailsHistory();
+      });
+      this.historyReset.addEventListener("click", () => this.setChartView(null));
+      this.attachChartZoom(select(".history-chart"));
       this.historyMessage = select(".history-message");
       this.historyChart = select(".history-chart");
       this.detailsKey = null;
@@ -5133,11 +5310,17 @@ ${gridStyles}
       // The language chosen with the flags or in the editor wins over the card setting, in this browser; Ukrainian by default.
       const language = storedLanguage() ?? (config.language === "en" ? "en" : "uk");
       if (language !== config.language) { this.setConfig({ ...config, language }, true); return; }
-      const technika = this.visualConfig().lcd_theme === "technika";
+      const look = this.visualConfig().lcd_theme;
+      const technika = look === "technika" || look === "3d";
       this.dataset.theme = technika ? "technika" : "classic";
+      // 3D is built on ТЕХНіКА (menus, flows, palette) and swaps the main-screen gauges for pictures.
+      if (look === "3d") this.dataset.look = "3d"; else delete this.dataset.look;
+      this.dataset.motion = this.visualConfig().lcd_motion === "off" ? "off" : "on";
+      this.applyWorkshop();
       this.dataset.palette = this.visualConfig().lcd_palette === "graphite" ? "graphite" : "olive";
       this.dataset.frame = storedFrame();
       this.updateAppearance(true);
+      this.update3d(true);
       this.statusSurface.setAttribute("fill", technika ? "url(#deye-technika-status)" : screenWhite);
       this.scale = installedInverters(config).reduce((total, index) =>
         total + readModel(config[inverterField(index, "inverter_model")], this.inverterCount > 1), 0);
@@ -5182,6 +5365,7 @@ ${gridStyles}
     relevantChange(previous, next) {
       if (!previous || !next || previous.config?.time_zone !== next.config?.time_zone) return true;
       if (previous.themes?.darkMode !== next.themes?.darkMode) return true;
+      if (previous.states?.["sun.sun"]?.state !== next.states?.["sun.sun"]?.state) return true;
       const before = previous.states ?? {}, after = next.states ?? {};
       // Home Assistant replaces a state object when it changes, so identity is enough.
       return this.watchedEntities().some(id => before[id] !== after[id]);
@@ -5268,7 +5452,7 @@ ${gridStyles}
     getGridOptions() { return { columns: 12, min_columns: 6 }; }
 
     visualConfig() {
-      const base = { ...DeyeLcd.getStubConfig(), ...this.config, ...this.visualPreferences };
+      const base = { lcd_motion:"on", ...DeyeLcd.getStubConfig(), ...this.config, ...this.visualPreferences };
       // The editor preview always shows КЛАСіК, light or black after Home Assistant.
       return this.editorPreview ? { ...base, lcd_theme:"classic", lcd_appearance:"auto", lcd_auto_source:"ha" } : base;
     }
@@ -5307,7 +5491,7 @@ ${gridStyles}
     }
 
     resetVisualPreferences() {
-      this.visualPreferences = { lcd_theme:"classic", lcd_palette:"olive", lcd_appearance:"auto", lcd_auto_source:"ha", lcd_particles:"dot" };
+      this.visualPreferences = { lcd_theme:"classic", lcd_palette:"olive", lcd_appearance:"auto", lcd_auto_source:"ha", lcd_particles:"dot", lcd_motion:"on" };
       this.saveVisualPreferences();
     }
 
@@ -5374,8 +5558,30 @@ ${gridStyles}
         : this.t("Applied for this session. Browser storage is unavailable.", "Застосовано на цей сеанс. Сховище браузера недоступне.");
     }
 
+    workshopMarkup() {
+      const t = this.t.bind(this), english = preferEnglish(this.config);
+      const text = (value) => escapeHtml(english ? value?.en ?? value?.uk ?? "" : value?.uk ?? value?.en ?? "");
+      const enabled = storedWorkshop();
+      const sponsor = workshop.find(entry => entry.id === this.workshopView);
+      const head = (title) => `<div class="ws-head"><button type="button" class="ws-back" data-workshop-back aria-label="${t("Back", "Назад")}">‹</button><h3>${escapeHtml(title)}</h3></div>`;
+      if (sponsor) return `${head(sponsor.name)}<div class="ws-list">${sponsor.options.map(option => `<button type="button" class="ws-option" data-workshop-option="${escapeHtml(option.id)}" role="switch" aria-checked="${enabled[option.id] === true}">
+          <span><b>${text(option.label)}</b>${option.note ? `<small>${text(option.note)}</small>` : ""}</span><i aria-hidden="true"></i></button>`).join("")}</div>`;
+      return `${head(t("Workshop", "Майстерня"))}<p class="ws-intro">${t("Personal options made for the card's sponsors. Everything here is off by default.", "Персональні опції, зроблені для спонсорів картки. Усе тут вимкнено за замовчуванням.")}</p>
+        <div class="ws-list">${workshop.length ? workshop.map(entry => {
+          const count = entry.options.filter(option => enabled[option.id] === true).length;
+          return `<button type="button" class="ws-sponsor" data-workshop-sponsor="${escapeHtml(entry.id)}"><b>${escapeHtml(entry.name)}</b><small>${count ? t(`${count} on`, `увімк.: ${count}`) : t(`${entry.options.length} options`, `опцій: ${entry.options.length}`)}</small><span aria-hidden="true">›</span></button>`;
+        }).join("") : `<p class="ws-empty">${t("Nothing here yet.", "Поки що порожньо.")}</p>`}</div>`;
+    }
+
+    applyWorkshop() {
+      const enabled = storedWorkshop();
+      const ids = [...workshopOptionIds].filter(id => enabled[id] === true);
+      if (ids.length) this.dataset.workshop = ids.join(" "); else delete this.dataset.workshop;
+    }
+
     openAppearance() {
       if (!this.isConnected || !this.config || !this.appearanceDialog.hidden) return;
+      this.workshopView = null;
       this.renderAppearance();
       const card = this.haCard.getBoundingClientRect();
       const trigger = this.appearanceTrigger.getBoundingClientRect();
@@ -5407,7 +5613,7 @@ ${gridStyles}
       const button = (key, value, text, extra = "") =>
         `<button type="button" data-visual-key="${key}" data-visual-value="${value}" aria-pressed="${config[key] === value}"${extra}>${text}</button>`;
       const row = (id, label, content) => `<span class="ap-label" id="ap-${id}">${label}</span><div class="ap-seg" role="group" aria-labelledby="ap-${id}">${content}</div>`;
-      const technika = config.lcd_theme === "technika";
+      const technika = config.lcd_theme === "technika" || config.lcd_theme === "3d";
       const auto = !manualAppearances.includes(config.lcd_appearance);
       const palette = config.lcd_palette === "graphite" ? t("Graphite", "Графіт") : t("Olive", "Олива");
       const sources = visualValues.lcd_auto_source;
@@ -5418,13 +5624,15 @@ ${gridStyles}
       const britain = '<svg viewBox="0 0 60 30" aria-hidden="true"><path d="M0 0h60v30H0z" fill="#012169"/><path d="M0 0l60 30M60 0L0 30" stroke="#fff" stroke-width="6"/><path d="M0 0l60 30M60 0L0 30" stroke="#c8102e" stroke-width="2.4"/><path d="M30 0v30M0 15h60" stroke="#fff" stroke-width="10"/><path d="M30 0v30M0 15h60" stroke="#c8102e" stroke-width="6"/></svg>';
       // Common options first; options that only the ТЕХНіКА theme has always go below them.
       const latest = this.updateAvailable() ? this.latestRelease : null;
+      if (this.workshopView) { this.appearanceDialog.innerHTML = this.workshopMarkup(); return; }
       this.appearanceDialog.innerHTML = `<h2 id="appearance-title" class="sr-only">${t("Card appearance", "Оформлення картки")}</h2>
         ${latest ? `<div class="ap-update" role="status"><div><b>${t(`Version ${escapeHtml(latest.version)} is out`, `Вийшла версія ${escapeHtml(latest.version)}`)}</b>
           <p>${t(`You have ${currentVersion}. Update in HACS → Deye · LCD ТЕХНіКА.`, `У вас ${currentVersion}. Оновіть у HACS → Deye · LCD ТЕХНіКА.`)}</p>
           ${latest.url ? `<a href="${escapeHtml(latest.url)}" target="_blank" rel="noopener noreferrer">${t("What’s new ↗", "Що нового ↗")}</a>` : ""}</div>
           <button type="button" data-update-dismiss aria-label="${t("Hide until the next version", "Сховати до наступної версії")}" title="${t("Hide until the next version", "Сховати до наступної версії")}">×</button></div>` : ""}
         <div class="ap-grid">
-          ${row("theme", t("Theme", "Тема"), button("lcd_theme", "classic", "КЛАСіК") + button("lcd_theme", "technika", "ТЕХНіКА"))}
+          ${row("theme", t("Theme", "Тема"), button("lcd_theme", "classic", "КЛАСіК") + button("lcd_theme", "technika", "ТЕХНіКА") + button("lcd_theme", "3d", "3D"))}
+          ${config.lcd_theme === "3d" ? row("motion", t("Animation", "Анімація"), button("lcd_motion", "on", t("On", "Увімк.")) + button("lcd_motion", "off", t("Off", "Вимк."))) : ""}
           <span class="ap-label" id="ap-mode">${t("Look", "Вигляд")}</span>
           <div class="ap-seg ap-look" role="group" aria-labelledby="ap-mode">
             ${button("lcd_appearance", "auto", `<span class="ap-auto">${icon.auto}<span>${t("Auto", "Авто")}</span></span>${dots}`, ` aria-label="${t("Auto", "Авто")} · ${sourceName}" title="${sourceName}"`)}
@@ -5443,6 +5651,8 @@ ${gridStyles}
               `<button type="button" data-frame-toggle="on" aria-pressed="${storedFrame() === "on"}">${t("On", "Увімк.")}</button>` +
               `<button type="button" data-frame-toggle="off" aria-pressed="${storedFrame() === "off"}">${t("Off", "Вимк.")}</button>`)}` : ""}
         </div>
+        <button type="button" class="ap-workshop" data-workshop-open aria-haspopup="true">
+          <span class="ap-workshop-t" aria-hidden="true">T</span><span>${t("Workshop", "Майстерня")}</span></button>
         <div class="ap-footer">
           <div class="ap-flags" role="group" aria-label="${t("Language", "Мова")}">${flag("uk", "Українська", ukraine)}${flag("en", "English", britain)}</div>
           <span class="ap-version">v${currentVersion}</span>
@@ -5487,6 +5697,8 @@ ${gridStyles}
       this.detailsHtml = "";
       this.detailsSplit = false;
       this.detailsData = null;
+      this.historyMode = "day";
+      this.chartView = null;
       this.detailsScreen.dataset.source = gauge.source;
       this.screen.setAttribute("hidden", "");
       this.detailsScreen.hidden = false;
@@ -5543,7 +5755,11 @@ ${gridStyles}
       const canSplit = count > 1;
       this.historyToggle.hidden = !canSplit;
       this.historyToggle.setAttribute("aria-pressed", String(Boolean(this.detailsSplit)));
-      this.historyHeading.textContent = this.detailsSplit && canSplit ? this.t("Power by inverter · 24 h", "Потужність по інверторах · 24 год")
+      const month = this.historyMode === "month";
+      this.historyMonth.setAttribute("aria-pressed", String(month));
+      this.historyToggle.hidden = !canSplit || month;
+      if (month) this.historyHeading.textContent = this.t("Energy per day · 30 days", "Енергія по днях · 30 днів");
+      else this.historyHeading.textContent = this.detailsSplit && canSplit ? this.t("Power by inverter · 24 h", "Потужність по інверторах · 24 год")
         : canSplit ? this.t("Combined power · 24 h", "Загальна потужність · 24 год") : this.t("Power · 24 h", "Потужність · 24 год");
       const html = page === "chart" ? "" : gridBodyHtml({
         config:this.config, states, source, page, edit:false, t:this.t.bind(this), english, soc:this.runtimeSoc ?? null,
@@ -5566,7 +5782,8 @@ ${gridStyles}
       const empty = this.t("No power records in the last 24 hours.", "Немає записів потужності за останні 24 години.");
       const choose = this.t("Select a power sensor in the card editor.", "Виберіть датчик потужності в редакторі картки.");
       const plot = points => points.some(point => point.value !== null)
-        ? historyPlot(points, start, end, zone, preferEnglish(this.config)) : "";
+        ? historyPlot(points, start, end, zone, preferEnglish(this.config), this.chartView) : "";
+      this.refreshZoomButton();
       if (this.detailsSplit && series.length > 1) {
         const parts = series.map(({ index, id, points }) => {
           const title = this.t(`Inverter ${index + 1}`, `Інвертор ${index + 1}`);
@@ -5594,6 +5811,8 @@ ${gridStyles}
     async loadDetailsHistory() {
       const gauge = gaugeByKey[this.detailsKey];
       if (!gauge) return;
+      this.refreshZoomButton();
+      if (this.historyMode === "month") { await this.loadMonthHistory(); return; }
       // The battery chart lives on its own page: fetch it only once that page is opened.
       if (gauge.source === "battery" && this.detailsPage !== "chart") { ++this.historyRequest; this.detailsData = null; return; }
       const series = powerSources(this.config, gauge);
@@ -5641,6 +5860,147 @@ ${gridStyles}
         this.renderDetailsHistory();
       } catch {
         if (request === this.historyRequest) this.showHistory(this.t("Could not load Home Assistant history.", "Не вдалося завантажити історію Home Assistant."));
+      }
+    }
+
+    /* 0.8.33 · 24 h graph zoom: wheel or pinch zooms around the finger/cursor, drag pans, double tap or ⟲ resets. */
+    setChartView(view) {
+      const data = this.detailsData;
+      if (!data || this.historyMode === "month") return;
+      const full = data.end - data.start;
+      if (view) {
+        const span = Math.max(30 * 1000, Math.min(full, view.end - view.start));
+        let start = Math.max(data.start, Math.min(view.start, data.end - span));
+        view = span >= full - 1000 ? null : { start, end:start + span };
+      }
+      this.chartView = view;
+      cancelAnimationFrame(this.chartFrame);
+      this.chartFrame = requestAnimationFrame(() => this.renderDetailsHistory());
+    }
+
+    refreshZoomButton() {
+      const data = this.detailsData, view = this.chartView;
+      const zoom = data && view && this.historyMode !== "month" ? (data.end - data.start) / (view.end - view.start) : 1;
+      this.historyReset.hidden = zoom <= 1.01;
+      this.historyReset.textContent = `⟲ ×${zoom >= 10 ? Math.round(zoom) : Math.round(zoom * 10) / 10}`;
+      this.historyReset.setAttribute("aria-label", this.t("Reset zoom", "Скинути масштаб"));
+      this.historyChart?.toggleAttribute("data-zoomed", zoom > 1.01);
+    }
+
+    attachChartZoom(chart) {
+      const timeAt = (clientX) => {
+        const svg = chart.querySelector("[data-history-plot]");
+        const data = this.detailsData;
+        if (!svg || !data) return null;
+        const rect = svg.getBoundingClientRect();
+        const view = this.chartView ?? { start:data.start, end:data.end };
+        const ratio = Math.min(1, Math.max(0, ((clientX - rect.left) / rect.width * 390 - 45) / 334));
+        return { time:view.start + ratio * (view.end - view.start), ratio, view };
+      };
+      const zoomAt = (clientX, factor) => {
+        const at = timeAt(clientX);
+        if (!at) return;
+        const span = (at.view.end - at.view.start) * factor;
+        this.setChartView({ start:at.time - at.ratio * span, end:at.time + (1 - at.ratio) * span });
+      };
+      chart.addEventListener("wheel", event => {
+        if (this.historyMode === "month" || !chart.querySelector("[data-history-plot]")) return;
+        event.preventDefault();
+        zoomAt(event.clientX, Math.exp(event.deltaY * .0025));
+      }, { passive:false });
+      const pointers = new Map();
+      let pinch = null, drag = null, lastTap = 0;
+      chart.addEventListener("pointerdown", event => {
+        if (this.historyMode === "month" || !chart.querySelector("[data-history-plot]")) return;
+        pointers.set(event.pointerId, event.clientX);
+        chart.setPointerCapture?.(event.pointerId);
+        if (pointers.size === 2) {
+          const [a, b] = [...pointers.values()];
+          pinch = { distance:Math.max(10, Math.abs(a - b)), center:(a + b) / 2, view:this.chartView };
+          drag = null;
+        } else if (pointers.size === 1) {
+          const now = Date.now();
+          if (now - lastTap < 320) { this.setChartView(null); lastTap = 0; return; }
+          lastTap = now;
+          drag = { x:event.clientX, at:timeAt(event.clientX) };
+        }
+      });
+      chart.addEventListener("pointermove", event => {
+        if (!pointers.has(event.pointerId)) return;
+        pointers.set(event.pointerId, event.clientX);
+        if (pinch && pointers.size === 2) {
+          const [a, b] = [...pointers.values()];
+          const distance = Math.max(10, Math.abs(a - b));
+          this.chartView = pinch.view;
+          zoomAt(pinch.center, pinch.distance / distance);
+        } else if (drag?.at && this.chartView) {
+          const svg = chart.querySelector("[data-history-plot]");
+          if (!svg) return;
+          const width = svg.getBoundingClientRect().width * 334 / 390;
+          const span = drag.at.view.end - drag.at.view.start;
+          const shift = -(event.clientX - drag.x) / width * span;
+          this.setChartView({ start:drag.at.view.start + shift, end:drag.at.view.end + shift });
+        }
+      });
+      const release = event => {
+        pointers.delete(event.pointerId);
+        if (pointers.size < 2) pinch = null;
+        if (!pointers.size) drag = null;
+      };
+      chart.addEventListener("pointerup", release);
+      chart.addEventListener("pointercancel", release);
+    }
+
+    async loadMonthHistory() {
+      const hass = this.hassData;
+      const request = ++this.historyRequest;
+      this.detailsData = null;
+      const indices = installedInverters(this.config);
+      const groups = [
+        { key:"pv", field:"pv_energy_today", label:this.t("Solar", "Сонце") },
+        { key:"load", field:"load_energy_today", label:this.t("Load", "Навантаження") },
+        { key:"grid", field:"grid_energy_today", label:this.t("Grid", "Мережа") },
+      ].map(group => ({ ...group, ids:[...new Set(indices.map(index => this.config[inverterField(index, group.field)]).filter(hasEditorBinding))] }))
+        .filter(group => group.ids.length);
+      if (!groups.length) {
+        this.showHistory(this.t("Link the «Today» energy sensors (Solar, Load, Grid) in the editor to see the month.",
+          "Прив'яжіть у редакторі сенсори енергії «Сьогодні» (Сонце, Навантаження, Мережа), щоб бачити місяць."));
+        return;
+      }
+      if (typeof hass?.callWS !== "function") {
+        this.showHistory(this.t("Home Assistant statistics are temporarily unavailable.", "Статистика Home Assistant тимчасово недоступна."));
+        return;
+      }
+      this.showHistory(this.t("Loading statistics…", "Завантажую статистику…"));
+      const first = new Date(); first.setHours(0, 0, 0, 0); first.setDate(first.getDate() - 29);
+      const days = Array.from({ length:30 }, (_, k) => {
+        const day = new Date(first); day.setDate(first.getDate() + k);
+        return { key:day.toDateString(), short:`${day.getDate()}.${String(day.getMonth() + 1).padStart(2, "0")}`,
+          label:day.toLocaleDateString(this.t("en-GB", "uk-UA"), { day:"numeric", month:"long" }) };
+      });
+      try {
+        const result = await hass.callWS({
+          type:"recorder/statistics_during_period", start_time:first.toISOString(), end_time:new Date().toISOString(),
+          statistic_ids:groups.flatMap(group => group.ids), period:"day", types:["change"], units:{ energy:"kWh" },
+        });
+        if (request !== this.historyRequest) return;
+        const series = groups.map(group => {
+          const values = days.map(() => null);
+          for (const id of group.ids) for (const row of result?.[id] ?? []) {
+            const at = new Date(typeof row.start === "number" ? row.start : Date.parse(row.start));
+            const index = days.findIndex(day => day.key === at.toDateString());
+            if (index >= 0 && Number.isFinite(row.change)) values[index] = (values[index] ?? 0) + row.change;
+          }
+          return { key:group.key, label:group.label, values };
+        });
+        if (!series.some(item => item.values.some(Number.isFinite))) {
+          this.showHistory(this.t("No daily statistics yet. The «Today» sensors need state_class total_increasing (or total).",
+            "Ще немає денної статистики. Сенсори «Сьогодні» мають бути з state_class total_increasing (або total)."));
+          return;
+        }
+        this.showHistory("", monthPlot(days, series, preferEnglish(this.config)));
+      } catch {
+        if (request === this.historyRequest) this.showHistory(this.t("Could not load Home Assistant statistics.", "Не вдалося завантажити статистику Home Assistant."));
       }
     }
 
@@ -6382,6 +6742,9 @@ ${gridStyles}
       const path = fraction === 0 ? "" : arc(0, fraction);
       fill.setAttribute("d", path);
       gloss?.setAttribute("d", path);
+      const gauge = this.gauges[key];
+      (gauge.fill3d ??= gauge.element.querySelector(".fill3d"))?.setAttribute("d", fraction === 0 ? "" : arc3d(fraction));
+      gauge.element.toggleAttribute("data-active", fraction > 0);
     }
 
     setFlow(name, power) {
@@ -6541,7 +6904,23 @@ ${gridStyles}
       }
     }
 
+    update3d(force = false) {
+      // Pictures are only requested while the 3D theme is on; day or night follows sun.sun.
+      if (this.dataset.look !== "3d") return;
+      const night = this.hassData?.states?.["sun.sun"]?.state === "below_horizon";
+      if (!force && this.night3d === night) return;
+      this.night3d = night;
+      this.toggleAttribute("data-night", night);
+      for (const image of this.screen.querySelectorAll("[data-obj3d]")) {
+        if (image.dataset.obj3d) image.setAttribute("href", picture3d(image.dataset.obj3d, night));
+      }
+      for (const image of this.screen.querySelectorAll("[data-src3d]")) {
+        if (!image.getAttribute("href")) image.setAttribute("href", asset3d(image.dataset.src3d));
+      }
+    }
+
     update() {
+      this.update3d();
       if (!this.config || !this.hassData?.states) {
         if (!this.settingsScreen.hidden) this.renderSettings();
         return;

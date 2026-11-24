@@ -10,6 +10,7 @@ on:
       - CHANGELOG.md
       - docs/README_UA.txt
       - .github/workflows/release.yml
+      - img/**
   workflow_dispatch:
 
 permissions:
@@ -47,10 +48,13 @@ jobs:
           V=${{ steps.version.outputs.version }}
           mkdir -p dist
           cp deye-lcd-tehnika.js docs/README_UA.txt dist/
-          (cd dist && zip -q "Deye_LCD_Tehnika_v$V.zip" deye-lcd-tehnika.js README_UA.txt)
+          cp -r img dist/
+          # HACS takes deye-lcd-tehnika.zip (card + pictures of the 3D theme) and unpacks it next to the card.
+          (cd dist && zip -qr deye-lcd-tehnika.zip deye-lcd-tehnika.js img)
+          (cd dist && zip -qr "Deye_LCD_Tehnika_v$V.zip" deye-lcd-tehnika.js img README_UA.txt)
           # Notes: the CHANGELOG section of this version, up to the next «## » heading.
           awk -v v="$V" '$0 ~ "^## "v" " {on=1; next} on && /^## / {exit} on {print}' CHANGELOG.md > dist/notes.md
-          printf '\nВстановлення: через HACS (Custom repositories → тип Dashboard) або вручну — файл deye-lcd-tehnika.js нижче.\n' >> dist/notes.md
+          printf '\nВстановлення й оновлення: лише через HACS (Магазин → Custom repositories → тип Dashboard).\n' >> dist/notes.md
           cat dist/notes.md
 
       - name: Create release
@@ -63,4 +67,4 @@ jobs:
             --target "$GITHUB_SHA" \
             --title "Deye · LCD ТЕХНіКА v$V" \
             --notes-file dist/notes.md \
-            dist/deye-lcd-tehnika.js "dist/Deye_LCD_Tehnika_v$V.zip"
+            dist/deye-lcd-tehnika.zip dist/deye-lcd-tehnika.js "dist/Deye_LCD_Tehnika_v$V.zip"
