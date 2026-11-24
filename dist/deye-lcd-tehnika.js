@@ -9,7 +9,7 @@
   const legacyCardTag = "deye-lcd-8k";
   if (customElements.get(cardTag)) return;
 
-  const version = "Alpha 0.8.33";
+  const version = "Alpha 0.8.34";
   const currentVersion = version.replace(/^[^\d]*/, "");
   const models = [3, 5, 6, 8, 10, 12, 15, 20, 30, 80, 160];
   const defaultModel = 8;
@@ -615,9 +615,11 @@
     return [radius * Math.cos(radians), radius * Math.sin(radians)].map(n => n.toFixed(3)).join(" ");
   }
 
-  /* ── 0.8.33 · 3D theme: photo-like pictures (separate files next to the card) + a live fill and a light animation layer ── */
-  const assetBase = (() => { try { return new URL("./img/3d/", import.meta.url).href; } catch { return "/hacsfiles/deye-lcd-tehnika/img/3d/"; } })();
-  const asset3d = (name) => `${assetBase}${name}.webp?v=${encodeURIComponent(currentVersion)}`;
+  /* ── 0.8.33 · 3D theme: photo-like pictures + a live fill and a light animation layer ──
+   * 0.8.34 · the pictures lie next to the card file (3d-*.webp in the same folder, no subfolders):
+   * HACS / Marketplace copy the whole dist/ directory of the release there. Nothing is loaded from the internet. */
+  const assetBase = (() => { try { return new URL("./", import.meta.url).href; } catch { return "/hacsfiles/deye-lcd-tehnika/"; } })();
+  const asset3d = (name) => `${assetBase}3d-${name}.webp?v=${encodeURIComponent(currentVersion)}`;
   const object3d = { solar:"sun", grid:"grid", battery:"battery", house:"house", generator:"generator" };
   const seasonal3d = new Set(["sun", "grid", "house"]);
   const picture3d = (object, night) => asset3d(seasonal3d.has(object) ? `${object}_${night ? "night" : "day"}_summer` : `${object}_${night ? "night" : "day"}`);
@@ -2721,6 +2723,7 @@
     @keyframes a3-led { 0%, 100% { opacity:.25; } 50% { opacity:1; } }
     @keyframes a3-smoke { 0% { transform:translate(0,0) scale(.5); opacity:0; } 20% { opacity:.75; } 100% { transform:translate(5px,-16px) scale(2.4); opacity:0; } }
     @keyframes a3-vib { 50% { transform:translate(.35px,-.3px); } }
+    .ap-note { grid-column:1 / -1; margin:0; padding:7px 9px; border-radius:8px; background:var(--ap-field); color:var(--ap-muted); font-size:12px; line-height:1.4; }
     .ap-workshop { display:flex; align-items:center; gap:14px; width:100%; margin:12px 0 2px; padding:9px 16px; border-radius:12px; cursor:pointer;
       font:inherit; font-size:20px; font-weight:650; letter-spacing:2px; color:var(--ap-ink); background:linear-gradient(180deg,rgba(255,255,255,.08),rgba(0,0,0,.12)) var(--ap-field);
       border:2px solid #9be36b; box-shadow:0 0 10px rgba(155,227,107,.55), inset 0 0 8px rgba(155,227,107,.18); }
@@ -5314,7 +5317,7 @@ ${gridStyles}
       const technika = look === "technika" || look === "3d";
       this.dataset.theme = technika ? "technika" : "classic";
       // 3D is built on ТЕХНіКА (menus, flows, palette) and swaps the main-screen gauges for pictures.
-      if (look === "3d") this.dataset.look = "3d"; else delete this.dataset.look;
+      if (look === "3d" && !this.missing3dFiles) this.dataset.look = "3d"; else delete this.dataset.look;
       this.dataset.motion = this.visualConfig().lcd_motion === "off" ? "off" : "on";
       this.applyWorkshop();
       this.dataset.palette = this.visualConfig().lcd_palette === "graphite" ? "graphite" : "olive";
@@ -5632,7 +5635,8 @@ ${gridStyles}
           <button type="button" data-update-dismiss aria-label="${t("Hide until the next version", "Сховати до наступної версії")}" title="${t("Hide until the next version", "Сховати до наступної версії")}">×</button></div>` : ""}
         <div class="ap-grid">
           ${row("theme", t("Theme", "Тема"), button("lcd_theme", "classic", "КЛАСіК") + button("lcd_theme", "technika", "ТЕХНіКА") + button("lcd_theme", "3d", "3D"))}
-          ${config.lcd_theme === "3d" ? row("motion", t("Animation", "Анімація"), button("lcd_motion", "on", t("On", "Увімк.")) + button("lcd_motion", "off", t("Off", "Вимк."))) : ""}
+          ${config.lcd_theme === "3d" && this.missing3dFiles ? `<p class="ap-note" role="status">${t("3D pictures were not found next to the card, so the usual gauges are shown. Update the card in the Marketplace (HACS) and reload the page.", "Картинки 3D не знайдено поруч із карткою, тому показано звичайні шкали. Оновіть картку в Магазині (HACS) і перезавантажте сторінку.")}</p>` : ""}
+          ${config.lcd_theme === "3d" && !this.missing3dFiles ? row("motion", t("Animation", "Анімація"), button("lcd_motion", "on", t("On", "Увімк.")) + button("lcd_motion", "off", t("Off", "Вимк."))) : ""}
           <span class="ap-label" id="ap-mode">${t("Look", "Вигляд")}</span>
           <div class="ap-seg ap-look" role="group" aria-labelledby="ap-mode">
             ${button("lcd_appearance", "auto", `<span class="ap-auto">${icon.auto}<span>${t("Auto", "Авто")}</span></span>${dots}`, ` aria-label="${t("Auto", "Авто")} · ${sourceName}" title="${sourceName}"`)}
@@ -6911,12 +6915,23 @@ ${gridStyles}
       if (!force && this.night3d === night) return;
       this.night3d = night;
       this.toggleAttribute("data-night", night);
-      for (const image of this.screen.querySelectorAll("[data-obj3d]")) {
+      for (const image of this.screen.querySelectorAll("[data-obj3d], [data-src3d]")) {
+        if (!image.hasAttribute("data-watch3d")) {
+          // A picture that cannot be loaded switches the card back to the usual ТЕХНіКА gauges instead of empty circles.
+          image.setAttribute("data-watch3d", "");
+          image.addEventListener("error", () => this.missing3d());
+        }
         if (image.dataset.obj3d) image.setAttribute("href", picture3d(image.dataset.obj3d, night));
+        else if (!image.getAttribute("href")) image.setAttribute("href", asset3d(image.dataset.src3d));
       }
-      for (const image of this.screen.querySelectorAll("[data-src3d]")) {
-        if (!image.getAttribute("href")) image.setAttribute("href", asset3d(image.dataset.src3d));
-      }
+    }
+
+    missing3d() {
+      if (this.missing3dFiles || this.dataset.look !== "3d") return;
+      this.missing3dFiles = true;
+      delete this.dataset.look;
+      this.removeAttribute("data-night");
+      if (!this.appearanceDialog.hidden && !this.workshopView) this.renderAppearance();
     }
 
     update() {

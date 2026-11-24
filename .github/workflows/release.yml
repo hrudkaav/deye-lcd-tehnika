@@ -1,16 +1,18 @@
-# Automatic release: when deye-lcd-tehnika.js with a new version reaches main,
-# this creates the tag vX.Y.Z and a GitHub release with the card file and the zip archive.
+# Automatic release: when dist/deye-lcd-tehnika.js with a new version reaches main,
+# this creates the tag vX.Y.Z and a GitHub release with an archive of the card.
+# HACS / Marketplace install the card from the dist/ directory of that release:
+# the card file and the 3D-theme pictures (3d-*.webp) lie there side by side, without subfolders.
 name: Release
 
 on:
   push:
     branches: [main]
     paths:
-      - deye-lcd-tehnika.js
+      - dist/**
       - CHANGELOG.md
       - docs/README_UA.txt
+      - hacs.json
       - .github/workflows/release.yml
-      - img/**
   workflow_dispatch:
 
 permissions:
@@ -25,8 +27,8 @@ jobs:
       - name: Read version from the card
         id: version
         run: |
-          VERSION=$(grep -oP 'const version = "Alpha \K[0-9]+\.[0-9]+\.[0-9]+' deye-lcd-tehnika.js)
-          if [ -z "$VERSION" ]; then echo "Version not found in deye-lcd-tehnika.js"; exit 1; fi
+          VERSION=$(grep -oP 'const version = "Alpha \K[0-9]+\.[0-9]+\.[0-9]+' dist/deye-lcd-tehnika.js)
+          if [ -z "$VERSION" ]; then echo "Version not found in dist/deye-lcd-tehnika.js"; exit 1; fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Card version: $VERSION"
 
@@ -46,16 +48,13 @@ jobs:
         if: steps.check.outputs.exists == 'false'
         run: |
           V=${{ steps.version.outputs.version }}
-          mkdir -p dist
-          cp deye-lcd-tehnika.js docs/README_UA.txt dist/
-          cp -r img dist/
-          # HACS takes deye-lcd-tehnika.zip (card + pictures of the 3D theme) and unpacks it next to the card.
-          (cd dist && zip -qr deye-lcd-tehnika.zip deye-lcd-tehnika.js img)
-          (cd dist && zip -qr "Deye_LCD_Tehnika_v$V.zip" deye-lcd-tehnika.js img README_UA.txt)
+          mkdir -p build
+          cp dist/* docs/README_UA.txt build/
+          (cd build && zip -q "Deye_LCD_Tehnika_v$V.zip" *)
           # Notes: the CHANGELOG section of this version, up to the next «## » heading.
-          awk -v v="$V" '$0 ~ "^## "v" " {on=1; next} on && /^## / {exit} on {print}' CHANGELOG.md > dist/notes.md
-          printf '\nВстановлення й оновлення: лише через HACS (Магазин → Custom repositories → тип Dashboard).\n' >> dist/notes.md
-          cat dist/notes.md
+          awk -v v="$V" '$0 ~ "^## "v" " {on=1; next} on && /^## / {exit} on {print}' CHANGELOG.md > build/notes.md
+          printf '\nВстановлення й оновлення: лише через Магазин (HACS) — Custom repositories → тип Dashboard.\n' >> build/notes.md
+          cat build/notes.md
 
       - name: Create release
         if: steps.check.outputs.exists == 'false'
@@ -66,5 +65,5 @@ jobs:
           gh release create "v$V" \
             --target "$GITHUB_SHA" \
             --title "Deye · LCD ТЕХНіКА v$V" \
-            --notes-file dist/notes.md \
-            dist/deye-lcd-tehnika.zip dist/deye-lcd-tehnika.js "dist/Deye_LCD_Tehnika_v$V.zip"
+            --notes-file build/notes.md \
+            "build/Deye_LCD_Tehnika_v$V.zip"
