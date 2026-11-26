@@ -9,7 +9,7 @@
   const legacyCardTag = "deye-lcd-8k";
   if (customElements.get(cardTag)) return;
 
-  const version = "Alpha 0.8.39";
+  const version = "Alpha 0.8.40";
   const currentVersion = version.replace(/^[^\d]*/, "");
   const models = [3, 5, 6, 8, 10, 12, 15, 20, 30, 80, 160];
   const defaultModel = 8;
@@ -499,6 +499,7 @@
     phases: "Phase readings", batteries: "Individual batteries", inverters: "Individual inverters",
     inv0: "Inverter 1 · phases", inv1: "Inverter 2 · phases", inv2: "Inverter 3 · phases",
   };
+  const generatorShowWatts = 200;
   const generatorActive = (config, states) => {
     const value = states[config.generator_signal_state]?.state;
     const active = typeof config.generator_signal_active_value === "string" && config.generator_signal_active_value.trim() || "on";
@@ -865,7 +866,7 @@
       <title ${textAttributes(text)}>Генератор</title>
       <path class="generator-connector" d="M193 173v28"/>
       <text class="generator-status" x="171" y="184" ${textAttributes(pair("Signal", "Сигнал"))}>Сигнал</text>
-      <text class="generator-status" x="171" y="198" ${textAttributes(pair("on", "увімк."))}>увімк.</text>
+      <text class="generator-status" x="171" y="198" data-generator-signal ${textAttributes(pair("on", "увімк."))}>увімк.</text>
       <text class="generator-amount" x="227" y="185" data-generator-power>—</text>
       <text class="unit" x="227" y="198">KW</text>
       <g class="gen-icon" transform="translate(178.4 204.6) scale(.3495)">${generatorIcon}</g>
@@ -900,6 +901,8 @@
         <path class="hud-edge"/>
         <path class="hud-fill" stroke="url(#deye-3d-hud)"/>
         <ellipse class="under3d" cx="0" cy="${isBattery ? 40 : 45}" rx="${isBattery ? 33 : 30}" ry="${isBattery ? 24 : 18}" fill="url(#deye-3d-under)"/>
+        <ellipse class="under3d" cx="-46" cy="42" rx="12" ry="10" fill="url(#deye-3d-under)"/>
+        <ellipse class="under3d" cx="47" cy="42" rx="17" ry="10" fill="url(#deye-3d-under)"/>
       </g>
       <circle class="technika-only" r="36.65" fill="url(#deye-technika-face)" stroke="#f8f9e7" stroke-width=".55" stroke-opacity=".569" clip-path="url(#deye-technika-face-cut)" aria-hidden="true"/>
       <path class="technika-only" d="${track}" fill="none" stroke="#3e423e" stroke-width="9" stroke-linecap="round" aria-hidden="true"/>
@@ -1507,8 +1510,11 @@
       gridTile("voltage", "Voltage", "Напруга", "v", "avg", "generator_voltage", { fromSub:true }),
       gridTile("current", "Current", "Струм", "a", "sum", "generator_current", { fromSub:true }),
       gridTile("today", "Today", "Сьогодні", "kwh", "sum", "generator_energy_today"),
+      // 0.8.40 · The GEN Signal for the generator icon, linked right here (one for the whole card).
+      gridTile("signal", "GEN Signal", "Сигнал GEN", "none", "signal", "generator_signal_state", { dom:["binary_sensor", "switch", "input_boolean", "sensor"], global:true }),
     ] },
   };
+  const tileIndices = (tile, indices) => tile.global ? [0] : indices;
   const gridSubMetrics = [
     { k:"voltage", label:pair("Voltage", "Напруга"), unit:"v" },
     { k:"current", label:pair("Current", "Струм"), unit:"a" },
@@ -1568,6 +1574,7 @@
       return { v:total === null ? null : total * batteryFactor(config, source), bound:Boolean(item.id), derived:!item.id && source === "pv" ? "pv" : "" };
     }
     const id = config[inverterField(index, tile.field)];
+    if (tile.k === "signal") return hasEditorBinding(id) ? { v:String(states[id]?.state ?? ""), bound:true, derived:"" } : null;
     if (tile.k === "status") {
       if (!id) return null;
       const state = String(states[id]?.state ?? "").toLowerCase();
@@ -1686,6 +1693,15 @@
     if (ah !== null && ah > 0 && volts !== null && volts > 0) return { kwh:ah * volts / 1000, source:"ah" };
     return null;
   }
+  // 0.8.40 · Where the discharge threshold comes from: typed in, the inverter's «Shutdown» entity, or the default 20 %.
+  function runtimeCutoffSource(config, states) {
+    const custom = config.battery_runtime_cutoff;
+    if (custom !== undefined && custom !== null && custom !== "" && Number.isFinite(Number(custom))) return "manual";
+    const shutdown = states[config.battery_shutdown];
+    const value = reading(shutdown);
+    return String(shutdown?.attributes?.unit_of_measurement ?? "").trim() === "%" && value !== null && value >= 0 && value < 100 ? "inverter" : "default";
+  }
+  const cutoffSourceText = (source, t) => source === "manual" ? t("typed in", "вказано вручну") : source === "inverter" ? t("from the inverter", "з інвертора") : t("default", "типовий");
   function runtimeCutoffOf(config, states) {
     const custom = config.battery_runtime_cutoff;
     if (custom !== undefined && custom !== null && custom !== "" && Number.isFinite(Number(custom))) return Math.min(95, Math.max(0, Number(custom)));
@@ -1731,13 +1747,13 @@
       if (load === null || load < idle) note = t("Load power is unavailable.", "Немає даних про потужність навантаження.");
       else {
         value = soc <= cutoff ? t("Threshold reached", "Поріг досягнуто") : durationText(capacity.kwh * (soc - cutoff) / 100 / (load / 1000) * 60, t);
-        note = t(`down to ${number(cutoff)} % · ${number(capacity.kwh)} kWh · at the current load`, `до ${number(cutoff)} % · ${number(capacity.kwh)} кВт·год · за поточним навантаженням`);
+        note = t(`down to ${number(cutoff)} % (${cutoffSourceText(runtimeCutoffSource(config, states), t)}) · ${number(capacity.kwh)} kWh · at the current load`, `до ${number(cutoff)} % (${cutoffSourceText(runtimeCutoffSource(config, states), t)}) · ${number(capacity.kwh)} кВт·год · за поточним навантаженням`);
       }
     } else if (power === null) note = t("Battery power is unavailable.", "Немає даних про потужність АКБ.");
     else if (power < idle) note = t("The battery is idle.", "АКБ у спокої.");
     else {
       value = soc <= cutoff ? t("Threshold reached", "Поріг досягнуто") : durationText(capacity.kwh * (soc - cutoff) / 100 / (power / 1000) * 60, t);
-      note = t(`down to ${number(cutoff)} % · ${number(capacity.kwh)} kWh · at the current power`, `до ${number(cutoff)} % · ${number(capacity.kwh)} кВт·год · за поточною потужністю`);
+      note = t(`down to ${number(cutoff)} % (${cutoffSourceText(runtimeCutoffSource(config, states), t)}) · ${number(capacity.kwh)} kWh · at the current power`, `до ${number(cutoff)} % (${cutoffSourceText(runtimeCutoffSource(config, states), t)}) · ${number(capacity.kwh)} кВт·год · за поточною потужністю`);
     }
     return { label, value, note, charging:charging && value !== "—", capacity, cutoff };
   }
@@ -1782,7 +1798,7 @@
     const layout = gridLayouts[source];
     const indices = gridInverters(config, source);
     let done = 0, total = 0, power = false;
-    for (const tile of layout.tiles) for (const index of indices) {
+    for (const tile of layout.tiles) for (const index of tileIndices(tile, indices)) {
       total++;
       const row = gridReading(config, {}, source, tile, index);
       if (row) { done++; if (tile.k === "power") power = true; }
@@ -1797,7 +1813,7 @@
     if (page === "sub") return indices.flatMap(index => gridSubMetrics.flatMap(({ k }) =>
       gridColumns(config, source, index).map(column => inverterField(index, gridSubField(source, column, k)))));
     const layout = gridLayouts[source];
-    const order = layout.tiles.flatMap(tile => indices.map(index => inverterField(index, tile.field)));
+    const order = layout.tiles.flatMap(tile => tileIndices(tile, indices).map(index => inverterField(index, tile.field)));
     if (layout.runtime) order.splice(2 * indices.length, 0, "__runtime");
     return order;
   }
@@ -1826,6 +1842,7 @@
       let inner = "+";
       if (hasEditorBinding(id)) {
         if (tile.k === "status") inner = entity?.state === "on" ? `✓ ${escapeHtml(t("on", "є"))}` : entity?.state === "off" ? `✕ ${escapeHtml(t("off", "немає"))}` : "—";
+        else if (tile.k === "signal") inner = escapeHtml(String(entity?.state ?? "—").slice(0, 12));
         else { const shown = gridFormat(tile, gridValue(tile.k, tile.unit, id, states), english); inner = escapeHtml(shown.text); }
       }
       return `<button type="button" class="slot${hasEditorBinding(id) ? "" : " empty"}${sel === name ? " sel" : ""}" data-gslot="${escapeHtml(name)}"
@@ -1835,10 +1852,10 @@
     const tileHtml = (tile, n) => {
       const keyMark = tile.main ? `<span class="key">${escapeHtml(t("MAIN", "ГОЛОВНА"))}</span>` : "";
       if (edit) {
-        const rows = indices.map(index => ({ index, row:gridReading(config, states, source, tile, index) }));
+        const rows = tileIndices(tile, indices).map(index => ({ index, row:gridReading(config, states, source, tile, index) }));
         const done = rows.every(({ row }) => row);
         const slots = rows.map(({ index, row }) => {
-          const prefix = parallel ? `#${index + 1}` : "";
+          const prefix = parallel && !tile.global ? `#${index + 1}` : "";
           if (row && !row.bound && row.derived) {
             const shown = gridFormat(tile, row.v, english);
             return `<span class="slot derived">${prefix ? `<i>${prefix}</i>` : ""}${escapeHtml(shown.text)}<i>${escapeHtml(row.derived === "pv" ? t("PV sum", "сума PV") : row.derived === "channels" ? t("channel sum", "сума каналів") : t("from phases", "з фаз"))}</i></span>`;
@@ -1846,6 +1863,11 @@
           return slotHtml(inverterField(index, tile.field), tile, prefix);
         }).join("");
         return `<div class="g-tile e${sizeClass(n)}" style="order:${n * 2}"><span class="g-num${done ? " ok" : ""}">${n}</span>${keyMark}<dt>${L(tile.label)}</dt><div class="slots">${slots}</div></div>`;
+      }
+      if (tile.k === "signal") {
+        const bound = hasEditorBinding(config.generator_signal_state);
+        const on = bound && generatorActive(config, states);
+        return `<div class="g-tile${sizeClass(n)}" style="order:${n * 2}"><dt>${L(tile.label)}</dt><span class="g-stat">${gridIcons[!bound ? "none" : on ? "ok" : "off"]}</span><span class="g-stat-t">${escapeHtml(!bound ? "—" : on ? t("On", "Увімк.") : t("Off", "Вимк."))}</span></div>`;
       }
       if (tile.k === "status") {
         const status = gridStatus(config, states, indices);
@@ -1898,7 +1920,7 @@
         const origin = { manual:t("typed in", "вказано вручну"), banks:t("from the banks", "з ємностей АКБ"), sensor:t("from the sensor", "із сенсора"), ah:t("Ah × voltage", "А·год × напруга") };
         runtime = `<button type="button" class="g-rt e ${capacity ? "ok" : "empty"}${sel === "__runtime" ? " sel" : ""}" style="order:0" data-gslot="__runtime">
           <span>⏱ ${escapeHtml(t("Estimated time", "Розрахунковий час"))}</span><b>${capacity ? escapeHtml(t(`${fmt.format(Math.round(capacity.kwh * 10) / 10)} kWh · to ${fmt.format(cutoff)} %`, `${fmt.format(Math.round(capacity.kwh * 10) / 10)} кВт·год · до ${fmt.format(cutoff)} %`)) : escapeHtml(t("+ Set battery capacity", "+ Вказати ємність АКБ"))}</b>
-          <small>${escapeHtml(capacity ? t(`capacity ${origin[capacity.source]}`, `ємність ${origin[capacity.source]}`) + (config.battery_runtime_cutoff === undefined || config.battery_runtime_cutoff === "" ? t(" · default threshold", " · поріг типовий") : "") : t("without capacity the time is not calculated", "без ємності час не рахується"))}</small></button>`;
+          <small>${escapeHtml(capacity ? t(`capacity ${origin[capacity.source]}`, `ємність ${origin[capacity.source]}`) + t(" · threshold ", " · поріг ") + cutoffSourceText(runtimeCutoffSource(config, states), t) : t("without capacity the time is not calculated", "без ємності час не рахується"))}</small></button>`;
       } else {
         const info = runtimeInfo(config, states, o.soc ?? combinedSoc(config, states), t);
         runtime = `<div class="g-rt${info.charging ? " chg" : ""}" style="order:0"><span>${escapeHtml(info.label)}</span><b>${escapeHtml(info.value)}</b><small>${escapeHtml(info.note)}</small></div>`;
@@ -4215,6 +4237,7 @@ ${gridStyles}
         grid_energy_today:["today energy import", "daily energy bought", "today energy bought", "grid import today", "today grid import", "daily grid import"],
         grid_connected:["grid", "grid connected", "grid connection"], battery_soc:["battery", "battery soc", "state of charge"],
         battery_temperature:["battery temperature"], load_energy_today:["today load consumption", "daily load consumption", "load today"],
+        generator_signal_state:["generator signal", "gen signal", "generator relay", "gen relay", "generator on", "generator"],
         generator_power:["generator power", "gen power"], generator_energy_today:["generator energy today", "today generator", "generator today"],
       };
       if (special[field.key]) return special[field.key];
@@ -4257,7 +4280,7 @@ ${gridStyles}
       const query = visualWords(this.gridSearch);
       // 0.8.32 · «All entities, no filters» is remembered for each field separately.
       const all = Boolean(this.gridAllFields?.has(name));
-      const list = Object.values(states).filter(entity => all || entity.entity_id.split(".")[0] === field.tile.dom).filter(entity => {
+      const list = Object.values(states).filter(entity => all || [].concat(field.tile.dom).includes(entity.entity_id.split(".")[0])).filter(entity => {
         if (!query.length) return true;
         const text = `${entity.attributes?.friendly_name ?? ""} ${entity.entity_id}`.toLowerCase();
         return query.every(word => text.includes(word));
@@ -4267,6 +4290,8 @@ ${gridStyles}
         let score = name - .04 * visualWords(entity.entity_id.split(".")[1].replace(/_/g, " ")).length;
         const unit = String(entity.attributes?.unit_of_measurement ?? "").trim().toLowerCase();
         if (units && !all) score += units.includes(unit) ? .5 : -1.2;
+        // 0.8.40 · GEN Signal: on / off entities first, readings with units far below.
+        if (field.tile.k === "signal") score += (entity.entity_id.startsWith("sensor.") ? -.3 : .6) - (unit ? 1.5 : 0);
         if (field.column && /^l[123]$/.test(field.column)) {
           // 0.8.32 · Grid phases: CT sensors first, «Load» / «Output» lower; Load phases — the other way round.
           const words = ` ${visualWords(`${entity.attributes?.friendly_name ?? ""} ${entity.entity_id.replace(/_/g, " ")}`).join(" ")} `;
@@ -4287,6 +4312,8 @@ ${gridStyles}
     gridHelp(field) {
       const t = this.t.bind(this);
       const help = {
+        generator_signal_state:t("The live generator start signal or dry contact (on / off). When it is on, the generator icon appears on the main screen. The icon also lights up on its own when the generator gives more than 200 W.",
+          "Живий сигнал пуску генератора або сухий контакт (on / off). Коли він увімкнений — на головному екрані з'являється значок генератора. Значок також загоряється сам, коли генератор дає понад 200 Вт."),
         grid_power:t("Grid exchange power, W or kW. With it the Grid gauge already works. Look for «Grid Power» or «External CT Power».", "Потужність обміну з мережею, W або kW. Після неї шкала Мережі вже працює. Шукайте «Grid Power» або «External CT Power»."),
         grid_voltage:t("Grid voltage, V. On 3 phases it can be skipped — the tile averages L1–L3.", "Напруга мережі, V. На 3ф можна пропустити — кубик порахує середнє з L1–L3."),
         grid_current:t("Grid current, A. On 3 phases it can be skipped — the tile averages the phases.", "Струм мережі, A. На 3ф можна пропустити — кубик візьме середнє з фаз."),
@@ -4350,6 +4377,7 @@ ${gridStyles}
           <p class="v-tip">${escapeHtml(t("Not in the list? Settings → Devices & services → Entities: search for it and check that it is not disabled.", "Немає у списку? Налаштування → Пристрої та служби → Сутності: знайдіть пошуком і перевірте, чи вона не вимкнена."))}</p></div>` : ""}
         ${current ? `<div class="v-current"><span><b>${escapeHtml(entity?.attributes?.friendly_name ?? current)}</b><small>${escapeHtml(current)}${entity ? "" : ` · ${t("not found in Home Assistant", "не знайдено в Home Assistant")}`}</small></span>
           <button type="button" data-gclear>${t("Clear", "Прибрати")}</button></div>` : ""}
+        ${name === "generator_signal_state" ? `<label class="v-field"><span>${escapeHtml(t("Active value (default: on)", "Активне значення (типово on)"))}</span><input type="text" placeholder="on" value="${escapeHtml(String(this.config.generator_signal_active_value ?? ""))}" data-grtext="generator_signal_active_value"></label>` : ""}
         <input type="search" data-gsearch value="${escapeHtml(this.gridSearch ?? "")}" placeholder="${escapeHtml(t("Search entity…", "Пошук сутності…"))}" aria-label="${escapeHtml(t("Search entity", "Пошук сутності"))}">
         <label class="v-all"><input type="checkbox" data-gall${this.gridAllFields?.has(name) ? " checked" : ""}><span>${escapeHtml(t("All entities, no filters", "Усі сутності, без фільтрів"))}</span></label>
         <div class="v-list">${this.gridListHtml(name)}</div>
@@ -4503,6 +4531,13 @@ ${gridStyles}
         this.listAll = listAll.checked ? this.listPageKey : "";
         this.layoutKey = "";
         this.setConfig(this.config);
+        return;
+      }
+      const text = event.target.closest?.("[data-grtext]");
+      if (text) {
+        const next = { ...this.config }, value = String(text.value).trim();
+        if (value) next[text.dataset.grtext] = value; else delete next[text.dataset.grtext];
+        this.commit(next);
         return;
       }
       const input = event.target.closest?.("[data-grt]");
@@ -7173,7 +7208,20 @@ ${gridStyles}
       const direction = (value, negative, positive) => value === null || Math.abs(value) < flowThreshold ? "idle" : value < 0 ? negative : positive;
       this.screen.dataset.batteryFlow = direction(battery, "charge", "discharge");
       this.screen.dataset.gridFlow = gridDisconnected ? "idle" : direction(grid, "export", "import");
-      const genActive = generatorActive(this.config, states);
+      // 0.8.40 · The icon shows with the GEN Signal on, or by itself when the generator gives more than 200 W.
+      const genPower = total("generator_power");
+      const genSignal = generatorActive(this.config, states);
+      const genActive = genSignal || (genPower !== null && genPower >= generatorShowWatts);
+      // Shown by the power alone, the label says the signal is off (as the inverter would).
+      this.generatorSignal ??= this.screen.querySelector("[data-generator-signal]");
+      if (this.generatorSignal) {
+        const text = genSignal || this.editorPreview ? pair("on", "увімк.") : pair("off", "вимк.");
+        if (this.generatorSignal.dataset.ukText !== text.uk) {
+          this.generatorSignal.dataset.ukText = text.uk;
+          this.generatorSignal.dataset.enText = text.en;
+          this.generatorSignal.textContent = preferEnglish(this.config) ? text.en : text.uk;
+        }
+      }
       // The editor preview always shows the generator, so it can be set up before it ever runs.
       this.generatorGroup.toggleAttribute("hidden", !genActive && !this.editorPreview);
       this.generatorPower.textContent = genActive || this.editorPreview ? formatPower(total("generator_power")) : "—";
