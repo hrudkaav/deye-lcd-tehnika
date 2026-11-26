@@ -9,7 +9,7 @@
   const legacyCardTag = "deye-lcd-8k";
   if (customElements.get(cardTag)) return;
 
-  const version = "Alpha 0.8.40";
+  const version = "Alpha 0.8.41";
   const currentVersion = version.replace(/^[^\d]*/, "");
   const models = [3, 5, 6, 8, 10, 12, 15, 20, 30, 80, 160];
   const defaultModel = 8;
@@ -465,6 +465,9 @@
   const metricEnglish = { current: "Current", voltage: "Voltage", power: "Power", temperature: "Battery temperature", soc: "Battery charge" };
   const generatorGauge = { key: "generator_power", source: "generator", label: "Генератор", english: "Generator" };
   gaugeByKey.generator_power = generatorGauge;
+  // 0.8.41 · Micro-inverter (GEN port as micro-inverter input), one per card, as on the Deye LCD.
+  const microGauge = { key: "micro_power", source: "micro", label: "Мікроінвертор", english: "Micro inverter" };
+  gaugeByKey.micro_power = microGauge;
   const acMeasurements = measurementFields.filter(({ key }) => key !== "temperature");
   const phaseColumns = [
     { prefix: "l1", label: "L1" },
@@ -511,7 +514,7 @@
     const source = gauge.source;
     const mode = source === "battery" ? config?.battery_power_mode : config?.generator_power_mode;
     const summed = mode === "inverters" || mode === "channels";
-    const primaryOnly = source === "generator" ? !summed : source === "battery"
+    const primaryOnly = source === "micro" ? true : source === "generator" ? !summed : source === "battery"
       && (mode === "total" || !summed && !batterySeparate(config));
     const indices = primaryOnly ? [0] : installedInverters(config);
     return indices.map(index => {
@@ -557,7 +560,10 @@
     return sums;
   }
 
+  // 0.8.41 · Batteries without SOC: a voltage entity in the «Charge» field is volts, not percent.
+  const socInVolts = (entity) => ["v", "в"].includes(String(entity?.attributes?.unit_of_measurement ?? "").trim().toLowerCase());
   function charge(entity) {
+    if (socInVolts(entity)) return null;
     const soc = reading(entity);
     return soc === null || soc < 0 || soc > 100 ? null : soc;
   }
@@ -872,6 +878,27 @@
       <g class="gen-icon" transform="translate(178.4 204.6) scale(.3495)">${generatorIcon}</g>
       <g class="look3d-only" aria-hidden="true"><image class="obj3d gen3d" x="168" y="190" width="58" height="58" data-obj3d="generator"/><g class="anim3d">${anim3d("generator", [168, 190, 58])}</g></g>
       <rect class="hit" x="151" y="169" width="93" height="91" rx="5" fill="transparent"/>
+    </g>`;
+  }
+
+  // 0.8.41 · Micro-inverter block, a copy of the Deye LCD: under the date, a dotted line with an arrow down to «ON».
+  function microMarkup() {
+    const text = pair("Micro inverter", "Мікроінвертор");
+    return `<g class="micro" data-micro hidden role="button" tabindex="0" ${textAttributes(text, "label")} aria-label="Мікроінвертор">
+      <title ${textAttributes(text)}>Мікроінвертор</title>
+      <text class="micro-amount" x="202" y="39.5" text-anchor="middle" data-micro-power>—</text>
+      <g class="mi-panel"><rect x="177.5" y="43.8" width="8" height="5.4"/><path d="M181.5 43.8v5.4M177.5 46.5h8"/></g>
+      <path class="mi-wire" d="M185.5 45.6H189.2M185.5 47.4H189.2"/>
+      <path class="mi-bus" d="M178 61.5H189.2M215 61.5H218"/>
+      <rect class="mi-box" x="189.2" y="43" width="25.8" height="23" rx=".6"/>
+      <path class="mi-sym" d="M189.2 54.3H215M189.2 55.2H215" stroke-width=".55"/>
+      <path class="mi-sym" d="M197 48.3H208"/>
+      <path class="mi-sym" d="M197 50.6H208" stroke-dasharray="2.2 1.3"/>
+      <path class="mi-sym" d="M196.5 60.5c1.5-5 3.5-5 5 0s3.5 5 5 0"/>
+      <path class="mi-line" d="M202 72V100"/>
+      <circle class="mi-dot" r="2.4" cx="202" cy="90"><animate attributeName="cy" values="72;100" dur="1.6s" repeatCount="indefinite"/></circle>
+      <path class="mi-arrow" d="M198 96.5l4 6 4-6-4 2z"/>
+      <rect class="hit" x="174" y="29" width="48" height="76" rx="4" fill="transparent"/>
     </g>`;
   }
 
@@ -1475,7 +1502,7 @@
   /* ── 0.8.29 · gauge windows: one layout for the card (work) and for the editor (settings) ── */
   const gridUnits = {
     kw:pair("kW", "кВт"), v:pair("V", "В"), a:pair("A", "А"), kwh:pair("kWh", "кВт·год"), mwh:pair("MWh", "МВт·год"),
-    pct:pair("%", "%"), c:pair("°C", "°C"), none:pair("", ""),
+    pct:pair("%", "%"), c:pair("°C", "°C"), none:pair("", ""), hz:pair("Hz", "Гц"),
   };
   const gridAggText = { sum:pair("sum", "сума"), avg:pair("average", "середнє"), avgOn:pair("average", "середнє"), max:pair("highest", "найвища") };
   const gridTile = (k, en, uk, unit, agg, field, extra = {}) => ({ k, label:pair(en, uk), unit, agg, field, dom:"sensor", ...extra });
@@ -1514,14 +1541,21 @@
       gridTile("signal", "GEN Signal", "Сигнал GEN", "none", "signal", "generator_signal_state", { dom:["binary_sensor", "switch", "input_boolean", "sensor"], global:true }),
     ] },
   };
+  gridLayouts.micro = { tiles:[
+    gridTile("power", "Power", "Потужність", "kw", "sum", "micro_power", { main:true }),
+    gridTile("voltage", "Voltage", "Напруга", "v", "avg", "micro_voltage"),
+    gridTile("current", "Current", "Струм", "a", "sum", "micro_current"),
+    gridTile("frequency", "Frequency", "Частота", "hz", "avg", "micro_frequency"),
+    gridTile("today", "Today", "Сьогодні", "kwh", "sum", "micro_energy_today"),
+  ] };
   const tileIndices = (tile, indices) => tile.global ? [0] : indices;
   const gridSubMetrics = [
     { k:"voltage", label:pair("Voltage", "Напруга"), unit:"v" },
     { k:"current", label:pair("Current", "Струм"), unit:"a" },
     { k:"power", label:pair("Power", "Потужність"), unit:"kw" },
   ];
-  const gridShortNames = { pv:pair("Solar", "Сонце"), grid:pair("Grid", "Мережа"), battery:pair("Battery", "Батарея"), load:pair("Load", "Навантаження"), generator:pair("Generator", "Генератор") };
-  const gaugeOfSource = (source) => source === "generator" ? generatorGauge : gaugeLayout.find(gauge => gauge.source === source);
+  const gridShortNames = { pv:pair("Solar", "Сонце"), grid:pair("Grid", "Мережа"), battery:pair("Battery", "Батарея"), load:pair("Load", "Навантаження"), generator:pair("Generator", "Генератор"), micro:pair("Micro inverter", "Мікроінвертор") };
+  const gaugeOfSource = (source) => source === "generator" ? generatorGauge : source === "micro" ? microGauge : gaugeLayout.find(gauge => gauge.source === source);
   const gridInverters = (config, source) => powerSources(config, gaugeOfSource(source)).map(({ index }) => index);
   const gridHasSub = (config, source) => source === "pv" || (gridLayouts[source]?.sub === "phases" && threePhaseValues.includes(config.inverter_phases));
   const gridSubField = (source, column, metric) => `${source}_${column}_${metric}`;
@@ -1739,7 +1773,8 @@
       : onGrid ? t("If the grid goes down", "Якщо зникне мережа") : t("Battery runtime", "Час роботи від АКБ");
     let value = "—", note;
     if (!capacity) note = t("Set the battery capacity in the card editor (Main screen → Battery).", "Вкажіть ємність АКБ у редакторі картки («Головний екран» → Батарея).");
-    else if (soc === null) note = t("Battery charge is unavailable.", "Немає даних про заряд АКБ.");
+    else if (soc === null) note = socInVolts(states[config.battery_soc]) ? t("The time needs the battery charge in %; the Charge field shows volts.", "Для розрахунку часу потрібен заряд у %, а в полі «Заряд» — вольти.")
+      : t("Battery charge is unavailable.", "Немає даних про заряд АКБ.");
     else if (charging) {
       value = soc >= 100 ? t("Full", "Заряджено") : durationText(capacity.kwh * (100 - soc) / 100 / (-power / 1000) * 60, t);
       note = t(`to 100 % · ${number(capacity.kwh)} kWh · at the current power`, `до 100 % · ${number(capacity.kwh)} кВт·год · за поточною потужністю`);
@@ -2293,6 +2328,51 @@
     .generator text { text-anchor:middle; }
     .generator-status { fill:currentColor; font-size:11px; font-weight:600; }
     .generator-amount { fill:#355c4e; font-size:13px; font-weight:700; }
+    /* 0.8.41 · Micro-inverter: КЛАСіК copies the Deye LCD, ТЕХНіКА and 3D draw it in their own style. */
+    .micro { cursor:pointer; outline:none; }
+    .micro[hidden] { display:none; }
+    .micro-amount { fill:#45c157; font-size:11px; font-weight:600; }
+    .mi-panel { fill:none; stroke:#111; stroke-width:.7; }
+    .mi-wire { stroke:#777; stroke-width:.6; fill:none; }
+    .mi-bus { stroke:#111; stroke-width:1.7; fill:none; }
+    .mi-box { fill:#e4e4e6; stroke:#b8373a; stroke-width:.8; }
+    .mi-sym { fill:none; stroke:#b8373a; stroke-width:.85; }
+    .mi-line { stroke:#111; stroke-width:1.1; stroke-dasharray:1.2 1.6; fill:none; }
+    .mi-arrow { fill:#111; }
+    .mi-dot { fill:#2ecc40; }
+    .micro:not([data-active]) .mi-dot, :host([data-motion="off"]) .mi-dot { display:none; }
+    :host([data-appearance="dark"]) :is(.mi-panel, .mi-bus, .mi-line) { stroke:#d8dde0; }
+    :host([data-appearance="dark"]) .mi-arrow { fill:#d8dde0; }
+    :host([data-appearance="dark"]) .mi-box { fill:#2a2d30; }
+    :host([data-theme="technika"]) .micro-amount { fill:#8fe07a; font-weight:700; }
+    :host([data-theme="technika"]) .mi-box { fill:#2d3527; stroke:#a9c477; stroke-width:.9; }
+    :host([data-theme="technika"]) .mi-sym { stroke:#dbeeb0; }
+    :host([data-theme="technika"]) :is(.mi-panel, .mi-wire) { stroke:#a9c477; }
+    :host([data-theme="technika"]) :is(.mi-bus, .mi-line) { stroke:#8d9a7c; }
+    :host([data-theme="technika"]) .mi-arrow { fill:#8d9a7c; }
+    :host([data-theme="technika"]) .mi-dot { fill:#8fe07a; }
+    :host([data-theme="technika"][data-palette="graphite"]) .mi-box { fill:#2b3034; stroke:#9fb2bd; }
+    :host([data-theme="technika"][data-palette="graphite"]) :is(.mi-panel, .mi-wire) { stroke:#9fb2bd; }
+    :host([data-theme="technika"]:not([data-appearance="dark"])) .mi-box { fill:#e9efdc; }
+    :host([data-theme="technika"]:not([data-appearance="dark"])) .mi-sym { stroke:#4f6b2a; }
+    :host([data-theme="technika"]:not([data-appearance="dark"])) :is(.mi-bus, .mi-line) { stroke:#55604a; }
+    :host([data-theme="technika"]:not([data-appearance="dark"])) .mi-arrow { fill:#55604a; }
+    :host([data-look="3d"]) .screen .mi-box { fill:rgba(8,18,14,.72); stroke:#7dff9c; stroke-width:1; }
+    :host([data-look="3d"]) .screen .mi-sym { stroke:#b9ffcb; }
+    :host([data-look="3d"]) .screen :is(.mi-panel, .mi-wire) { stroke:#7dff9c; }
+    :host([data-look="3d"]) .screen :is(.mi-bus, .mi-line) { stroke:#e8f4ee; }
+    :host([data-look="3d"]) .screen .mi-arrow { fill:#e8f4ee; }
+    :host([data-look="3d"]) .screen .micro-amount { fill:#9dffb8; }
+    :host([data-look="3d"][data-scene="scene"]) .micro-amount { paint-order:stroke; stroke:rgba(0,0,0,.38); stroke-width:2px; stroke-linejoin:round; }
+    /* 0.8.41 · Card name. */
+    .card-name { fill:#142b38; font-size:10px; font-weight:600; letter-spacing:.4px; pointer-events:none; }
+    .card-name[data-top] { font-size:11px; }
+    :host([data-appearance="dark"]) .card-name { fill:var(--dark-display-ink); }
+    :host([data-theme="technika"]) .card-name { fill:#a9c477; }
+    :host([data-theme="technika"][data-palette="graphite"]) .card-name { fill:#b7c4cc; }
+    :host([data-look="3d"][data-scene="scene"]) .screen text.card-name { fill:#fff; paint-order:stroke; stroke:rgba(0,0,0,.4); stroke-width:2px; stroke-linejoin:round; }
+    /* 0.8.41 · Charge field in volts: neutral colour. */
+    .gauge .soc[data-volts] { fill:#7d878c !important; }
     .generator-connector { fill:none; stroke:currentColor; opacity:.65; stroke-width:1; stroke-dasharray:1 1.65; }
     :host([data-appearance="dark"]) .generator { color:var(--dark-display-ink); }
     :host([data-appearance="dark"]) .generator-amount { fill:var(--dark-value); }
@@ -3297,6 +3377,8 @@
       ...(parallel ? [choose("battery_topology", t("Battery topology", "Схема АКБ"), [
         ["shared", "Одна спільна АКБ", "Shared battery bank"], ["separate", "Окремі АКБ", "Separate batteries"],
       ], "shared")] : []),
+      text("card_name", t("Card name (up to 16 characters)", "Назва картки (до 16 символів)"),
+        t("Shown under the date; with the micro-inverter — between «T» and the date.", "Показується під датою; з мікроінвертором — між «Т» і датою.")),
       entity("generator_signal_state", t("GEN Signal · live state", "GEN Signal · стан для значка"),
         ["binary_sensor", "switch", "sensor"],
         t("Select the live generator request or dry-contact state. On shows the icon.", "Обери фактичний сигнал пуску або стан сухого контакту. On показує значок.")),
@@ -3309,6 +3391,13 @@
             group(`screen_${index}_generator`, t("Generator", "Генератор"), [...readings(index, "generator", acMeasurements),
               entity(inverterField(index, "generator_energy_today"), t("Generator today", "Генератор сьогодні")), ...phases(index, "generator")]),
             ...(index === 0 ? [
+              group("screen_0_micro", t("Micro inverter", "Мікроінвертор"), [
+                entity("micro_power", t("Micro inverter power", "Мікроінвертор · потужність")),
+                entity("micro_voltage", t("Micro inverter voltage", "Мікроінвертор · напруга")),
+                entity("micro_current", t("Micro inverter current", "Мікроінвертор · струм")),
+                entity("micro_frequency", t("Micro inverter frequency", "Мікроінвертор · частота")),
+                entity("micro_energy_today", t("Micro inverter today", "Мікроінвертор сьогодні")),
+              ]),
               entity("inverter_status", t("Inverter status", "Статус інвертора")),
               text("parallel_id", t("Parallel label", "Позначка паралельної роботи")),
             ] : []),
@@ -3360,6 +3449,7 @@
     load: ["load", "ups load", "backup load", "навантаження"],
     pv: ["pv", "solar", "сонячна генерація"],
     generator: ["generator", "gen", "генератор"],
+    micro: ["micro inverter", "microinverter", "micro", "mi", "мікроінвертор"],
     battery: ["battery", "bat", "batt", "акб", "батарея"],
   };
   const matchMetrics = {
@@ -3368,6 +3458,7 @@
     current: { names:["current","струм"], classes:["current"], units:["a","а"] },
     temperature: { names:["temperature","temp","температура"], classes:["temperature"], units:["°c","°f","°с"] },
     soc: { names:["soc","state of charge","charge","заряд"], classes:["battery"], units:["%"] },
+    frequency: { names:["frequency","freq","частота"], classes:["frequency"], units:["hz","гц"] },
   };
   const matchName = (name) => String(name ?? "").normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
 
@@ -3379,7 +3470,7 @@
     if (key === "grid_connected") {
       return { domain:"binary_sensor", names:new Set(["grid","grid connected","grid connection","grid status","стан мережі","мережа"]) };
     }
-    const parts = /^(grid|load|pv|battery|generator)(?:_(l[123]|[1-6]))?_(power|current|voltage|temperature|soc)(?:_([12]))?$/.exec(key);
+    const parts = /^(grid|load|pv|battery|generator|micro)(?:_(l[123]|[1-6]))?_(power|current|voltage|temperature|soc|frequency)(?:_([12]))?$/.exec(key);
     if (!parts) return null;
     const [, source, qualifier, metric, trailingBank] = parts;
     const qualifierKey = qualifier || trailingBank;
@@ -4157,10 +4248,12 @@ ${gridStyles}
           <span class="ms-chip ${state === "ok" ? "ok" : ""}" style="left:${cx.toFixed(1)}px;top:${(cy - radius - 9).toFixed(1)}px">${done} / ${total}</span>`;
       }
       // Generator: an outline around its actual block (rounded rect, not a circle — the tile itself isn't round).
-      const generator = root.querySelector("[data-generator]");
-      const hitRect = generator?.querySelector(".hit");
       const screenMatrix = svg.getScreenCTM?.();
-      if (generator && hitRect && !generator.hasAttribute("hidden") && screenMatrix) {
+      // Generator and micro-inverter: their own outlined hot spots with a counter (0.8.41 · micro added).
+      for (const [source, selector, label] of [["generator", "[data-generator]", t("Generator", "Генератор")], ["micro", "[data-micro]", t("Micro inverter", "Мікроінвертор")]]) {
+        const group = root.querySelector(selector);
+        const hitRect = group?.querySelector(".hit");
+        if (!group || !hitRect || group.hasAttribute("hidden") || !screenMatrix) continue;
         const gx = parseFloat(hitRect.getAttribute("x")) || 0;
         const gy = parseFloat(hitRect.getAttribute("y")) || 0;
         const gw = parseFloat(hitRect.getAttribute("width")) || 0;
@@ -4173,9 +4266,9 @@ ${gridStyles}
         const left = x0 - margin, top = y0 - margin;
         const w = gw * unit + margin * 2, h = gh * unit + margin * 2;
         const radiusPx = grx * unit + margin;
-        const { done, total, state } = gridProgress(config, states, "generator");
-        html += `<button type="button" class="ms-hot ${state}" data-gsource="generator" style="left:${left.toFixed(1)}px;top:${top.toFixed(1)}px;width:${w.toFixed(1)}px;height:${h.toFixed(1)}px;border-radius:${radiusPx.toFixed(1)}px"
-          aria-label="${escapeHtml(`${t("Generator", "Генератор")} · ${done} / ${total}`)}"></button>
+        const { done, total, state } = gridProgress(config, states, source);
+        html += `<button type="button" class="ms-hot ${state}" data-gsource="${source}" style="left:${left.toFixed(1)}px;top:${top.toFixed(1)}px;width:${w.toFixed(1)}px;height:${h.toFixed(1)}px;border-radius:${radiusPx.toFixed(1)}px"
+          aria-label="${escapeHtml(`${label} · ${done} / ${total}`)}"></button>
           <span class="ms-chip ${state === "ok" ? "ok" : ""}" style="left:${(left + w / 2).toFixed(1)}px;top:${(top + h + 2).toFixed(1)}px">${done} / ${total}</span>`;
       }
       overlay.innerHTML = html;
@@ -4238,6 +4331,9 @@ ${gridStyles}
         grid_connected:["grid", "grid connected", "grid connection"], battery_soc:["battery", "battery soc", "state of charge"],
         battery_temperature:["battery temperature"], load_energy_today:["today load consumption", "daily load consumption", "load today"],
         generator_signal_state:["generator signal", "gen signal", "generator relay", "gen relay", "generator on", "generator"],
+        micro_power:["micro inverter power", "microinverter power", "micro power", "mi power"], micro_voltage:["micro inverter voltage", "micro voltage"],
+        micro_current:["micro inverter current", "micro current"], micro_frequency:["micro inverter frequency", "micro frequency"],
+        micro_energy_today:["micro inverter today", "micro inverter energy today", "micro today"],
         generator_power:["generator power", "gen power"], generator_energy_today:["generator energy today", "today generator", "generator today"],
       };
       if (special[field.key]) return special[field.key];
@@ -4273,7 +4369,7 @@ ${gridStyles}
       if (!field) return { field, list:[] };
       const states = this.screenStates();
       const units = { kw:["w", "kw", "вт", "квт"], v:["v", "в", "mv", "kv"], a:["a", "а", "ma"], kwh:["kwh", "wh", "mwh", "квт·год"],
-        pct:["%"], c:["°c", "°f", "°с"] }[field.tile.unit];
+        pct:["%"], c:["°c", "°f", "°с"], hz:["hz", "гц"] }[field.tile.unit];
       const terms = this.gridTerms(field);
       const anchors = this.gridAnchors();
       const entities = editorEntities(this.hassData);
@@ -5242,6 +5338,8 @@ ${gridStyles}
           </g>
           ${gaugeLayout.map(gauge).join("")}
           ${generatorMarkup()}
+          ${microMarkup()}
+          <text class="card-name" x="202" y="40" text-anchor="middle" data-card-name></text>
         </svg>
         ${detailsMarkup()}
         ${settingsMarkup()}
@@ -5313,7 +5411,11 @@ ${gridStyles}
       this.parallelLabel = select("[data-parallel]");
       this.generatorGroup = select("[data-generator]");
       this.generatorPower = select("[data-generator-power]");
+      this.microGroup = select("[data-micro]");
+      this.microPower = select("[data-micro-power]");
+      this.cardName = select("[data-card-name]");
       onActivate(this.generatorGroup, () => this.openDetails("generator_power"));
+      onActivate(this.microGroup, () => this.openDetails("micro_power"));
       this.detailsScreen = select(".details-screen");
       this.detailsTitle = select("#details-title");
       this.detailsBody = select("[data-details-body]");
@@ -5924,7 +6026,7 @@ ${gridStyles}
 
     closeDetails() {
       if (!this.detailsKey) return;
-      const opener = this.gauges[this.detailsKey]?.element ?? this.generatorGroup;
+      const opener = this.gauges[this.detailsKey]?.element ?? (this.detailsKey === "micro_power" ? this.microGroup : this.generatorGroup);
       this.detailsKey = null;
       this.detailsData = null;
       this.detailsSplit = false;
@@ -7098,8 +7200,11 @@ ${gridStyles}
       this.socLabel.toggleAttribute("data-unweighted", separate && !weighted);
       const weightedSoc = weighted ? banks.reduce((sum, bank) => sum + bank.capacity * bank.charge, 0) /
         banks.reduce((sum, bank) => sum + bank.capacity, 0) : null;
-      this.socLabel.textContent = !separate ? percent(primary) : weighted ? percent(weightedSoc)
-        : banks.map(bank => percent(bank.charge)).join("·");
+      const voltsEntity = states[this.config.battery_soc];
+      const volts = !separate && socInVolts(voltsEntity) ? reading(voltsEntity) : null;
+      this.socLabel.toggleAttribute("data-volts", volts !== null);
+      this.socLabel.textContent = volts !== null ? `${(Math.round(volts * 10) / 10).toFixed(1)} ${preferEnglish(this.config) ? "V" : "В"}`
+        : !separate ? percent(primary) : weighted ? percent(weightedSoc) : banks.map(bank => percent(bank.charge)).join("·");
       const shown = !separate ? primary : weighted ? weightedSoc : null;
       const lowest = separate && !weighted && banks.every(bank => bank.charge !== null) ? Math.min(...banks.map(bank => bank.charge)) : null;
       level(this.socLabel, shown ?? lowest);
@@ -7225,6 +7330,26 @@ ${gridStyles}
       // The editor preview always shows the generator, so it can be set up before it ever runs.
       this.generatorGroup.toggleAttribute("hidden", !genActive && !this.editorPreview);
       this.generatorPower.textContent = genActive || this.editorPreview ? formatPower(total("generator_power")) : "—";
+      // 0.8.41 · Micro-inverter: shown once its power is linked (always in the editor preview, to set it up).
+      const microLinked = hasEditorBinding(this.config.micro_power);
+      const microShown = microLinked || this.editorPreview;
+      this.microGroup.toggleAttribute("hidden", !microShown);
+      const micro = microLinked ? total("micro_power") : null;
+      this.microPower.textContent = micro === null ? (microShown ? "—" : "") : Math.abs(micro) < 1000 ? `${Math.round(micro)}W` : `${(micro / 1000).toFixed(2)}kW`;
+      this.microGroup.toggleAttribute("data-active", micro !== null && micro >= flowThreshold);
+      // Card name: under the date, or between «Т» and the date when the micro-inverter takes that place.
+      const name = typeof this.config.card_name === "string" ? this.config.card_name.trim().slice(0, 16) : "";
+      if (this.cardName.textContent !== name) this.cardName.textContent = name;
+      this.cardName.toggleAttribute("data-top", microShown && Boolean(name));
+      if (microShown && name) {
+        this.cardName.setAttribute("x", "84"); this.cardName.setAttribute("y", "29");
+        const width = this.cardName.getComputedTextLength?.() || 0;
+        if (width > 72) { this.cardName.setAttribute("textLength", "72"); this.cardName.setAttribute("lengthAdjust", "spacingAndGlyphs"); }
+        else { this.cardName.removeAttribute("textLength"); this.cardName.removeAttribute("lengthAdjust"); }
+      } else {
+        this.cardName.setAttribute("x", "202"); this.cardName.setAttribute("y", "40");
+        this.cardName.removeAttribute("textLength"); this.cardName.removeAttribute("lengthAdjust");
+      }
       this.updateStatus(states, [grid, load, battery]);
       if (this.detailsKey) this.updateDetails();
       if (!this.settingsScreen.hidden) this.renderSettings();
