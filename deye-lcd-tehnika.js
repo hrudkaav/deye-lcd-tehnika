@@ -9,7 +9,7 @@
   const legacyCardTag = "deye-lcd-8k";
   if (customElements.get(cardTag)) return;
 
-  const version = "Alpha 0.8.41";
+  const version = "Alpha 0.8.42";
   const currentVersion = version.replace(/^[^\d]*/, "");
   const models = [3, 5, 6, 8, 10, 12, 15, 20, 30, 80, 160];
   const defaultModel = 8;
@@ -2365,8 +2365,8 @@
     :host([data-look="3d"]) .screen .micro-amount { fill:#9dffb8; }
     :host([data-look="3d"][data-scene="scene"]) .micro-amount { paint-order:stroke; stroke:rgba(0,0,0,.38); stroke-width:2px; stroke-linejoin:round; }
     /* 0.8.41 · Card name. */
-    .card-name { fill:#142b38; font-size:10px; font-weight:600; letter-spacing:.4px; pointer-events:none; }
-    .card-name[data-top] { font-size:11px; }
+    .card-name { fill:#142b38; font-size:13px; font-weight:800; letter-spacing:.6px; pointer-events:none; }
+    .card-name[data-top] { font-size:12px; }
     :host([data-appearance="dark"]) .card-name { fill:var(--dark-display-ink); }
     :host([data-theme="technika"]) .card-name { fill:#a9c477; }
     :host([data-theme="technika"][data-palette="graphite"]) .card-name { fill:#b7c4cc; }
@@ -2815,7 +2815,9 @@
     :host([data-theme="technika"][data-appearance="dark"]) { --tk-surface:#1a1c1e; }
     :host([data-theme="technika"][data-palette="graphite"]) { --tk-surface:#e4e7e9; }
     :host([data-theme="technika"][data-palette="graphite"][data-appearance="dark"]) { --tk-surface:#1d2124; }
-    :host([data-theme="technika"][data-frame="off"]) ha-card { background:var(--tk-surface) !important; border-color:var(--technika-frame-edge) !important; box-shadow:none !important; }
+    /* 0.8.42 · Frame off: no margin around the screen at all — the screen fills the card up to its rounded edge. */
+    :host([data-theme="technika"][data-frame="off"]) ha-card { padding:0 !important; border:0 !important; background:transparent !important; box-shadow:none !important; }
+    :host([data-theme="technika"][data-frame="off"]) .screen { border-radius:var(--ha-card-border-radius, 12px); box-shadow:none; }
     /* Menu items with no entity: pale, dashed, a «?» badge; a tap explains where to link it. */
     .lcd-setting[data-unbound] { cursor:help; opacity:.62; }
     .lcd-setting[data-unbound] .lcd-number-value,.lcd-setting[data-unbound] input { border-style:dashed; }
@@ -5339,7 +5341,7 @@ ${gridStyles}
           ${gaugeLayout.map(gauge).join("")}
           ${generatorMarkup()}
           ${microMarkup()}
-          <text class="card-name" x="202" y="40" text-anchor="middle" data-card-name></text>
+          <text class="card-name" x="202" y="42" text-anchor="middle" data-card-name></text>
         </svg>
         ${detailsMarkup()}
         ${settingsMarkup()}
@@ -7332,7 +7334,7 @@ ${gridStyles}
       this.generatorPower.textContent = genActive || this.editorPreview ? formatPower(total("generator_power")) : "—";
       // 0.8.41 · Micro-inverter: shown once its power is linked (always in the editor preview, to set it up).
       const microLinked = hasEditorBinding(this.config.micro_power);
-      const microShown = microLinked || this.editorPreview;
+      const microShown = microLinked || this.editorPreview === true;
       this.microGroup.toggleAttribute("hidden", !microShown);
       const micro = microLinked ? total("micro_power") : null;
       this.microPower.textContent = micro === null ? (microShown ? "—" : "") : Math.abs(micro) < 1000 ? `${Math.round(micro)}W` : `${(micro / 1000).toFixed(2)}kW`;
@@ -7340,14 +7342,15 @@ ${gridStyles}
       // Card name: under the date, or between «Т» and the date when the micro-inverter takes that place.
       const name = typeof this.config.card_name === "string" ? this.config.card_name.trim().slice(0, 16) : "";
       if (this.cardName.textContent !== name) this.cardName.textContent = name;
-      this.cardName.toggleAttribute("data-top", microShown && Boolean(name));
+      // Always a real true / false: toggleAttribute(name, undefined) flips the attribute on every update.
+      this.cardName.toggleAttribute("data-top", Boolean(microShown && name));
       if (microShown && name) {
         this.cardName.setAttribute("x", "84"); this.cardName.setAttribute("y", "29");
         const width = this.cardName.getComputedTextLength?.() || 0;
         if (width > 72) { this.cardName.setAttribute("textLength", "72"); this.cardName.setAttribute("lengthAdjust", "spacingAndGlyphs"); }
         else { this.cardName.removeAttribute("textLength"); this.cardName.removeAttribute("lengthAdjust"); }
       } else {
-        this.cardName.setAttribute("x", "202"); this.cardName.setAttribute("y", "40");
+        this.cardName.setAttribute("x", "202"); this.cardName.setAttribute("y", "42");
         this.cardName.removeAttribute("textLength"); this.cardName.removeAttribute("lengthAdjust");
       }
       this.updateStatus(states, [grid, load, battery]);
