@@ -9,7 +9,7 @@
   const legacyCardTag = "deye-lcd-8k";
   if (customElements.get(cardTag)) return;
 
-  const version = "Alpha 0.8.42";
+  const version = "Alpha 0.8.43";
   const currentVersion = version.replace(/^[^\d]*/, "");
   const models = [3, 5, 6, 8, 10, 12, 15, 20, 30, 80, 160];
   const defaultModel = 8;
@@ -3602,6 +3602,25 @@
     return { next, count };
   }
 
+  /*
+   * 0.8.43 · Older Safari (iPad on iOS 15 and earlier) has no container units (cqi / cqw): the inverter menus and windows,
+   * laid out in them, fell apart (one huge arrow over the whole tile). Every container unit goes through --cq: modern
+   * browsers keep the real 1cqi, older ones get --cq in pixels from a ResizeObserver on each container.
+   */
+  const cqSupported = (() => { try { return CSS.supports("width", "1cqi"); } catch { return false; } })();
+  const cqCss = (css) => css.replace(/(\d*\.?\d+)cq[iw]\b/g, "calc($1 * var(--cq, 1cqi))");
+  const cqContainers = ".settings, .details-screen, .v-screen, .ms-wrap, .g-ed";
+  function cqPolyfill(host, root) {
+    if (cqSupported || typeof ResizeObserver !== "function") return;
+    const observer = new ResizeObserver(entries => {
+      for (const entry of entries) entry.target.style.setProperty("--cq", `${entry.contentRect.width / 100}px`);
+    });
+    const watch = () => { for (const element of root.querySelectorAll(cqContainers)) if (!element.cqWatched) { element.cqWatched = true; observer.observe(element); } };
+    observer.observe(host);
+    watch();
+    new MutationObserver(watch).observe(root, { childList:true, subtree:true });
+  }
+
   const editorStyles = `
     :host{display:block;color:var(--primary-text-color,#ecf4f7);container-type:inline-size;min-width:0}
     *,*::before,*::after{box-sizing:border-box}
@@ -3923,7 +3942,8 @@ ${gridStyles}
       this.gridSel = "";
       this.visualField = "";
       this.attachShadow({ mode:"open" });
-      this.shadowRoot.innerHTML = `<style>${editorStyles}</style>
+      cqPolyfill(this, this.shadowRoot);
+      this.shadowRoot.innerHTML = `<style>${cqCss(editorStyles)}</style>
         <div class="editor-layout"></div>
         <p class="notice" role="status"></p>
         <dialog aria-labelledby="deye-editor-dialog-title"></dialog>`;
@@ -5251,7 +5271,8 @@ ${gridStyles}
       this.deviceColorScheme = window.matchMedia?.("(prefers-color-scheme: dark)");
       this.onDeviceColorSchemeChange = () => this.updateAppearance();
       this.attachShadow({ mode: "open" });
-      this.shadowRoot.innerHTML = `<style>${styles}</style><ha-card>
+      cqPolyfill(this, this.shadowRoot);
+      this.shadowRoot.innerHTML = `<style>${cqCss(styles)}</style><ha-card>
         <svg class="screen" data-status="missing" viewBox="0 0 400 268" aria-label="Головний екран Deye">
           <defs>
             <linearGradient id="deye-lcd-arc" gradientUnits="userSpaceOnUse" x1="-43" y1="12" x2="37" y2="20">
