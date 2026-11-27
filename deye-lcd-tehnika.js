@@ -9,7 +9,7 @@
   const legacyCardTag = "deye-lcd-8k";
   if (customElements.get(cardTag)) return;
 
-  const version = "Alpha 0.8.43";
+  const version = "Alpha 0.8.44";
   const currentVersion = version.replace(/^[^\d]*/, "");
   const models = [3, 5, 6, 8, 10, 12, 15, 20, 30, 80, 160];
   const defaultModel = 8;
@@ -512,11 +512,10 @@
 
   function powerSources(config, gauge) {
     const source = gauge.source;
-    const mode = source === "battery" ? config?.battery_power_mode : config?.generator_power_mode;
-    const summed = mode === "inverters" || mode === "channels";
-    const primaryOnly = source === "micro" ? true : source === "generator" ? !summed : source === "battery"
-      && (mode === "total" || !summed && !batterySeparate(config));
-    const indices = primaryOnly ? [0] : installedInverters(config);
+    // 0.8.44 · One universal rule: in parallel every power is the sum of the inverters' own entities
+    // (solar, grid, load, battery, generator). Only the micro-inverter is one per card. BAT1/BAT2 channels stay supported.
+    const mode = source === "battery" ? config?.battery_power_mode : "";
+    const indices = source === "micro" ? [0] : installedInverters(config);
     return indices.map(index => {
       const invert = gauge.invert ? config?.[inverterField(index, gauge.invert)] === true : false;
       const id = config?.[inverterField(index, gauge.key)];
@@ -536,7 +535,9 @@
   const powerParts = (sources) => sources.flatMap(source => source.parts ?? [source]);
 
   function powerTotal(sources, states, optional = false) {
-    const parts = powerParts(sources);
+    // 0.8.44 · An inverter with nothing linked is skipped, so the sum is made of what is linked.
+    const linked = sources.filter(source => (source.parts ?? [source]).some(part => part.id));
+    const parts = powerParts(linked.length ? linked : sources);
     const ids = parts.map(({ id }) => id).filter(Boolean);
     if (!ids.length) return optional ? 0 : null;
     if (new Set(ids).size !== ids.length) return null;
@@ -3285,8 +3286,7 @@
       ...batteryColumns.map(({ prefix, label }) => group(`screen_${index}_${prefix}`,
         t(`BAT${prefix.at(-1)} · individual readings`, `BAT${prefix.at(-1)} · окремі покази`), readings(index, prefix, measurementFields))),
     ];
-    const inverterSources = (index) => gaugeLayout.filter(gauge =>
-      gauge.source !== "battery" || index === 0 || batterySeparate(config) || ["inverters","channels"].includes(config.battery_power_mode)).map(gauge => {
+    const inverterSources = (index) => gaugeLayout.map(gauge => {
       const { source, invert } = gauge;
       const settings = readings(index, source, source === "battery" ? measurementFields : acMeasurements);
       if (source === "pv") settings.push(group(`screen_${index}_pv_inputs`, t("PV1–PV6", "PV1–PV6"),
@@ -3350,12 +3350,6 @@
     });
     const schema = [
       choose("language", t("Language", "Мова"), [["uk", "Українська", "Ukrainian"], ["en", "Англійська", "English"]], "uk"),
-      choose("battery_power_mode", t("Battery power source", "Джерело потужності АКБ"), [
-        ["legacy", "Як раніше (за схемою АКБ)", "As before (battery topology)"],
-        ["total", "Один сумарний датчик", "One total sensor"],
-        ["inverters", "Сума датчиків усіх інверторів", "Sum of inverter sensors"],
-      ], "legacy", t("Choose only measured, distinct sensors. Do not add a total to its component channels.",
-        "Обирайте окремі виміряні датчики. Не додавайте сумарний показ до його складових каналів.")),
       bool("battery_power_x2", t("Multiply battery power ×2", "Множити потужність АКБ ×2")),
       field({ name:"battery_runtime_capacity_kwh", selector:{ number:{ min:0.1, max:5000, step:0.1, mode:"box", unit_of_measurement:"kWh" } } },
         t("Battery runtime · usable capacity, kWh", "Час роботи від АКБ · ємність, кВт·год"),
@@ -3368,10 +3362,6 @@
       entity("battery_capacity_sensor", t("Battery runtime · capacity sensor (kWh)", "Час роботи від АКБ · сенсор ємності (кВт·год)"), "sensor",
         t("For example the Solarman «Battery Capacity» sensor in kWh. Check that it shows the full capacity, not the remaining energy.",
           "Наприклад, сенсор Solarman «Battery Capacity» у кВт·год. Перевірте, що він показує повну ємність, а не залишок.")),
-      choose("generator_power_mode", t("Generator power source", "Джерело потужності генератора"), [
-        ["total", "Один сумарний датчик", "One total sensor"],
-        ["inverters", "Сума датчиків усіх інверторів", "Sum of inverter sensors"],
-      ], "total"),
       choose("inverter_phases", t("Phases", "Кількість фаз"), [["1", "1 фаза", "1 phase"], ["3", "3 фази", "3 phases"]], "1"),
       choose("inverter_count", t("Inverters in parallel", "Інвертори в паралелі"),
         [["1", "1 інвертор", "1 inverter"], ["2", "2 інвертори", "2 inverters"], ["3", "3 інвертори", "3 inverters"]], "1"),
@@ -3381,17 +3371,18 @@
       ], "shared")] : []),
       text("card_name", t("Card name (up to 16 characters)", "Назва картки (до 16 символів)"),
         t("Shown under the date; with the micro-inverter — between «T» and the date.", "Показується під датою; з мікроінвертором — між «Т» і датою.")),
-      entity("generator_signal_state", t("GEN Signal · live state", "GEN Signal · стан для значка"),
-        ["binary_sensor", "switch", "sensor"],
-        t("Select the live generator request or dry-contact state. On shows the icon.", "Обери фактичний сигнал пуску або стан сухого контакту. On показує значок.")),
-      ...(config.generator_signal_state ? [text("generator_signal_active_value", t("GEN Signal · active value", "GEN Signal · активне значення"),
-        t("Default: on. For a sensor that uses another state, enter the state here.", "Типове значення on. Для сенсора з іншим станом введи його значення."))] : []),
       group("main_screen", t("Main screen", "Головний екран"), [
         ...installedInverters(config).map(index => {
           const fields = [
             ...inverterSources(index),
             group(`screen_${index}_generator`, t("Generator", "Генератор"), [...readings(index, "generator", acMeasurements),
-              entity(inverterField(index, "generator_energy_today"), t("Generator today", "Генератор сьогодні")), ...phases(index, "generator")]),
+              entity(inverterField(index, "generator_energy_today"), t("Generator today", "Генератор сьогодні")), ...phases(index, "generator"),
+              // 0.8.44 · GEN signal lives with the generator (moved here from «General»).
+              ...(index === 0 ? [entity("generator_signal_state", t("GEN Signal · live state", "GEN Signal · стан для значка"),
+        ["binary_sensor", "switch", "sensor"],
+        t("Select the live generator request or dry-contact state. On shows the icon.", "Обери фактичний сигнал пуску або стан сухого контакту. On показує значок.")),
+      ...(config.generator_signal_state ? [text("generator_signal_active_value", t("GEN Signal · active value", "GEN Signal · активне значення"),
+        t("Default: on. For a sensor that uses another state, enter the state here.", "Типове значення on. Для сенсора з іншим станом введи його значення."))] : [])] : [])]),
             ...(index === 0 ? [
               group("screen_0_micro", t("Micro inverter", "Мікроінвертор"), [
                 entity("micro_power", t("Micro inverter power", "Мікроінвертор · потужність")),
@@ -3808,6 +3799,28 @@ ${gridStyles}
     .g-ed{--details-ink:#f0faff;--details-muted:#d7edff;--details-rule:#b4dcec56;--details-metric-edge:#a4dbf085;--details-metric-face:#1332704f;--details-plot-face:#0d275e50;--details-focus:#ffe38a;
       position:relative;margin:3px;border-radius:5px;overflow:hidden;container-type:inline-size;outline:3px solid #f2b632;outline-offset:2px;
       background:linear-gradient(180deg,#362382 12%,#254698 52%,#08768d 100%);color:var(--details-ink);font:400 14px/1.3 Roboto,Arial,sans-serif}
+    /* 0.8.44 · «General» drawn with the card's own elements, in the style of the gauge windows. */
+    .gn-body{display:grid;gap:9px;padding:9px}
+    .gn-block{border:1px solid var(--details-metric-edge);border-radius:6px;padding:8px;background:var(--details-metric-face)}
+    .gn-title{display:flex;align-items:center;gap:6px;margin:0 0 6px;font-size:12px;font-weight:700;letter-spacing:.6px;color:#f2b632}
+    .gn-title .v-help-btn{margin-left:auto}
+    .gn-label{margin:8px 0 4px;font-size:12px;color:var(--details-muted)}
+    .gn-tiles{display:grid;grid-template-columns:repeat(var(--n,3),minmax(0,1fr));gap:6px}
+    .gn-tile{display:grid;gap:1px;justify-items:center;min-height:46px;padding:6px 4px;border:1px solid var(--details-metric-edge);border-radius:5px;
+      background:#0000002e;color:var(--details-muted);font:inherit;font-size:12px;cursor:pointer}
+    .gn-tile b{font-size:17px;font-weight:700;color:var(--details-ink)}
+    .gn-tile[aria-pressed="true"]{border:2px solid #f2b632;background:#f2b6321f;color:#ffe9b0}
+    .gn-row{display:flex;align-items:center;gap:8px;margin-top:6px;padding:7px 9px;border:1px solid var(--details-metric-edge);border-radius:5px;background:#0000002e}
+    .gn-row small{color:var(--details-muted)}
+    .gn-row select,.gn-row input[type="text"]{flex:1;min-width:0;height:32px;padding:0 8px;border:1px solid var(--details-metric-edge);border-radius:4px;background:#00000040;color:var(--details-ink);font:inherit}
+    .gn-row label{white-space:nowrap}
+    .gn-switch{margin-left:auto;padding:0;min-height:0;min-width:0;box-sizing:border-box;width:40px;height:22px;border-radius:11px;border:1px solid var(--details-metric-edge);background:#00000055;position:relative;cursor:pointer;flex:none}
+    .gn-switch::after{content:"";position:absolute;left:2px;top:2px;width:16px;height:16px;border-radius:50%;background:#cfd8dc;transition:left .15s}
+    .gn-switch[aria-checked="true"]{background:#2fbf6a;border-color:#2fbf6a}
+    .gn-switch[aria-checked="true"]::after{left:20px;background:#fff}
+    .gn-note{margin:7px 0 0;font-size:12px;line-height:1.4;color:var(--details-muted)}
+    .gn-preview{margin-top:6px;padding:6px;border-radius:5px;background:#00000066;text-align:center;font-size:12px;color:var(--details-muted)}
+    .gn-preview b{display:block;min-height:16px;color:#a9c477;font-weight:800;letter-spacing:.6px}
     .g-ed.dark{--details-ink:#f4faff;--details-muted:#9fb4c0;--details-rule:#1f2a31;--details-metric-edge:#22465c;--details-metric-face:#0b1116;--details-plot-face:#0a0e12;background:#050608}
     .g-ed .g-head{display:flex;align-items:center;gap:8px;min-height:44px;padding:0 10px;border-bottom:2px solid #f2b632;
       background:repeating-linear-gradient(135deg,#f2b632 0 14px,#e0a21e 14px 28px);color:#2a1e05}
@@ -3955,7 +3968,19 @@ ${gridStyles}
       });
       this.modal.addEventListener("close", () => { if (!this.modal.open) this.matchContext = null; });
       this.layout.addEventListener("click", event => this.navigate(event));
-      this.layout.addEventListener("input", event => { if (!this.screenInput(event)) this.visualInput(event); });
+      this.layout.addEventListener("input", event => {
+        const cardName = event.target.closest?.("[data-gen-name]");
+        if (cardName) {
+          // Live preview and counter while typing; saved on change.
+          const value = String(cardName.value).slice(0, 16);
+          const preview = this.layout.querySelector("[data-gen-preview]");
+          const counter = this.layout.querySelector("[data-gen-count]");
+          if (preview) preview.textContent = value.trim();
+          if (counter) counter.textContent = `${value.length} / 16`;
+          return;
+        }
+        if (!this.screenInput(event)) this.visualInput(event);
+      });
       this.layout.addEventListener("change", event => this.screenChange(event));
       // Pointing at any item of a shared-entity group lights up the whole group, so it reads as one setting.
       const hover = (event, on) => {
@@ -4014,6 +4039,88 @@ ${gridStyles}
       }
     }
 
+    renderGeneral() {
+      const slot = this.layout.querySelector(".general-slot");
+      if (!slot) return;
+      const t = this.t.bind(this);
+      const config = this.modeConfig();
+      const count = inverterCount(config);
+      const parallel = count > 1;
+      const phases = String(config.inverter_phases) === "3" ? "3" : "1";
+      const english = preferEnglish(config);
+      const tile = (key, value, big, small, on) =>
+        `<button type="button" class="gn-tile" data-gen="${key}:${value}" aria-pressed="${on}"><b>${escapeHtml(big)}</b>${escapeHtml(small)}</button>`;
+      // The tip button sits in the block title; the tip text opens right under the title.
+      const help = (key, text) => `<button type="button" class="v-help-btn" data-gen-help="${key}" aria-pressed="${this.generalHelp === key}"><span aria-hidden="true">?</span>${escapeHtml(this.generalHelp === key ? t("Hide", "Сховати") : t("Tip", "Порада"))}</button></div>`
+        + (this.generalHelp === key ? `<p class="gn-note" style="margin:0 0 6px">${escapeHtml(text)}</p>` : "");
+      const modelRows = installedInverters(config).map(index => {
+        const current = readModel(config[inverterField(index, "inverter_model")], parallel);
+        const options = models.filter(value => !parallel || value !== 160)
+          .map(value => `<option value="${value}"${value === current ? " selected" : ""}>${escapeHtml(modelText(value, config))}</option>`).join("");
+        const name = parallel ? (index === 0 ? t("Inverter 1 · Master", "Інвертор 1 · Master") : t(`Inverter ${index + 1}`, `Інвертор ${index + 1}`)) : t("Inverter", "Інвертор");
+        return `<div class="gn-row"><label for="gen-model-${index}">${escapeHtml(name)}</label><select id="gen-model-${index}" data-gen-model="${index}">${options}</select></div>`;
+      }).join("");
+      const name = typeof this.config.card_name === "string" ? this.config.card_name.slice(0, 16) : "";
+      const now = new Date();
+      const pad = (n) => String(n).padStart(2, "0");
+      const clock = `${pad(now.getMonth() + 1)}/${pad(now.getDate())}/${now.getFullYear()} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+      const dark = this.hassData?.themes?.darkMode === true;
+      slot.innerHTML = `<div class="g-ed${dark ? " dark" : ""}">
+        <header class="g-head"><h2>${escapeHtml(t("General", "Загальне"))}</h2></header>
+        <div class="gn-body">
+          <section class="gn-block" aria-label="${escapeHtml(t("System", "Система"))}">
+            <div class="gn-title">${escapeHtml(t("SYSTEM", "СИСТЕМА"))}${help("system", t(
+              "Inverters in parallel: the card adds up the power of every inverter (solar, grid, load, battery, generator); battery charge is the average. The scale maximum is the sum of the ratings.",
+              "Інвертори в паралелі: картка складає потужності всіх інверторів (сонце, мережа, навантаження, АКБ, генератор); заряд АКБ — середнє. Максимум шкали — сума номіналів."))}
+            <p class="gn-label">${escapeHtml(t("Inverters in parallel", "Інвертори в паралелі"))}</p>
+            <div class="gn-tiles" style="--n:3">${[1, 2, 3].map(n => tile("count", n, String(n), n === 1 ? t("inverter", "інвертор") : t("inverters", "інвертори"), n === count)).join("")}</div>
+            <p class="gn-label">${escapeHtml(t("Phases", "Фази"))}</p>
+            <div class="gn-tiles" style="--n:2">${tile("phases", "1", english ? "1P" : "1Ф", t("single-phase", "однофазні"), phases === "1")}${tile("phases", "3", english ? "3P" : "3Ф", t("three-phase", "трифазні"), phases === "3")}</div>
+            <p class="gn-label">${escapeHtml(parallel ? t("Models", "Моделі") : t("Model", "Модель"))}</p>
+            ${modelRows}
+          </section>
+          <section class="gn-block" aria-label="${escapeHtml(t("Battery", "АКБ"))}">
+            <div class="gn-title">${escapeHtml(t("BATTERY", "АКБ"))}${help("battery", t(
+              "«×2» doubles the battery power for integrations that only see BAT1 of two battery inputs.",
+              "«×2» подвоює потужність АКБ для інтеграцій, які бачать лише BAT1 із двох входів АКБ."))}
+            ${parallel ? `<p class="gn-label">${escapeHtml(t("Battery scheme", "Схема АКБ"))}</p>
+            <div class="gn-tiles" style="--n:2">${tile("topology", "shared", "1", t("shared battery", "спільна АКБ"), !batterySeparate(config))}${tile("topology", "separate", count === 3 ? "1+2+3" : "1+2", t("separate batteries", "окремі АКБ"), batterySeparate(config))}</div>` : ""}
+            <div class="gn-row"><span>${escapeHtml(t("Battery power ×2", "Потужність АКБ ×2"))}</span><small>${escapeHtml(t("if only BAT1 is seen", "якщо видно лише BAT1"))}</small>
+              <button type="button" class="gn-switch" role="switch" data-gen="x2:toggle" aria-checked="${config.battery_power_x2 === true}" aria-label="${escapeHtml(t("Battery power ×2", "Потужність АКБ ×2"))}"></button></div>
+          </section>
+          <section class="gn-block" aria-label="${escapeHtml(t("Card", "Картка"))}">
+            <div class="gn-title">${escapeHtml(t("CARD", "КАРТКА"))}</div>
+            <p class="gn-label">${escapeHtml(t("Card name (up to 16 characters)", "Назва картки (до 16 символів)"))}</p>
+            <div class="gn-row"><input type="text" maxlength="16" data-gen-name value="${escapeHtml(name)}" placeholder="${escapeHtml(t("e.g. Garage", "напр. Гараж"))}" aria-label="${escapeHtml(t("Card name", "Назва картки"))}"><small data-gen-count>${name.length} / 16</small></div>
+            <div class="gn-preview">${escapeHtml(clock)}<b data-gen-preview>${escapeHtml(name)}</b></div>
+            <p class="gn-label">${escapeHtml(t("Card language", "Мова картки"))}</p>
+            <div class="gn-tiles" style="--n:2">${tile("lang", "uk", "UA", "Українська", !english)}${tile("lang", "en", "EN", "English", english)}</div>
+          </section>
+        </div>
+      </div>`;
+    }
+
+    generalAction(args) {
+      if (this.tab !== "general") return false;
+      if (args.genHelp !== undefined) {
+        this.generalHelp = this.generalHelp === args.genHelp ? "" : args.genHelp;
+        this.renderGeneral();
+        return true;
+      }
+      if (args.gen === undefined) return false;
+      const [key, value] = String(args.gen).split(":");
+      const next = { ...this.config };
+      if (key === "count") next.inverter_count = String(value);
+      else if (key === "phases") next.inverter_phases = String(value);
+      else if (key === "topology") next.battery_topology = value === "separate" ? "separate" : "shared";
+      else if (key === "x2") next.battery_power_x2 = this.config.battery_power_x2 !== true;
+      else if (key === "lang") next.language = value === "en" ? "en" : "uk";
+      else return true;
+      this.commit(next);
+      this.layout.querySelector(`[data-gen="${CSS.escape(args.gen)}"]`)?.focus({ preventScroll:true });
+      return true;
+    }
+
     commit(next) {
       this.setConfig(next);
       this.dispatchEvent(new CustomEvent("config-changed", {
@@ -4049,6 +4156,7 @@ ${gridStyles}
       const active = subgroups.find(item => item.name === this.activePage) ?? subgroups[0];
       const screenVisual = this.tab === "screen" && this.screenView !== "list";
       const visual = this.tab === "menus" && this.menuView !== "list" || screenVisual;
+      const generalVisual = this.tab === "general";
       const periodPage = !visual && this.tab === "menus" && active?.name === "menu_work_1";
       const groupSchema = periodPage ? active.schema.filter(field =>
         !/^tou_[1-6]_/.test(field.name) || field.name.startsWith(`tou_${this.activePeriod}_`))
@@ -4056,7 +4164,7 @@ ${gridStyles}
       const direct = section.schema.filter(item => !item.schema);
       const mainGrid = this.tab === "screen" && direct.length > 1 && /_(pv|grid|load|battery)$/.test(section.name);
       const grid = (name, fields) => ({ name, type:"grid", flatten:true, schema:fields, column_min_width:"128px" });
-      const fields = visual ? [] : [
+      const fields = visual || generalVisual ? [] : [
         ...(mainGrid ? [grid("editor_main_fields", direct)] : direct),
         ...(this.tab === "screen" && groupSchema.length
           ? [grid("editor_page_fields", groupSchema)] : groupSchema),
@@ -4112,8 +4220,8 @@ ${gridStyles}
             ${button("view", "visual", t("Menu", "Меню"), visual)}${button("view", "list", t("List", "Список"), !visual)}</div>` : ""}
           ${this.tab === "screen" ? `<div class="view-toggle" role="group" aria-label="${t("Editor view", "Вигляд редактора")}"><span>${t("View:", "Вигляд:")}</span>
             ${button("view", "visual", t("Screen", "Екран"), screenVisual)}${button("view", "list", t("List", "Список"), !screenVisual)}</div>` : ""}
-          ${pageButtons}${periodButtons}${!visual && hasEntities ? `<label class="list-all"><input type="checkbox" data-listall${unfiltered ? " checked" : ""}><span>${escapeHtml(t("All entities, no filters", "Усі сутності, без фільтрів"))}</span></label>` : ""}${visual ? '<div class="visual-slot"></div>' : '<div class="form-slot"></div>'}</section></div>`;
-        if (!visual) this.layout.querySelector(".form-slot").append(this.form);
+          ${pageButtons}${periodButtons}${!visual && hasEntities ? `<label class="list-all"><input type="checkbox" data-listall${unfiltered ? " checked" : ""}><span>${escapeHtml(t("All entities, no filters", "Усі сутності, без фільтрів"))}</span></label>` : ""}${generalVisual ? '<div class="general-slot"></div>' : visual ? '<div class="visual-slot"></div>' : '<div class="form-slot"></div>'}</section></div>`;
+        if (!visual && !generalVisual) this.layout.querySelector(".form-slot").append(this.form);
         Object.assign(this.form, { schema:fields, computeLabel, computeHelper });
         this.visibleFields = fields.flatMap(editorLeaves);
       }
@@ -4140,7 +4248,8 @@ ${gridStyles}
         for (const item of sections) updateCount(item, "section");
         for (const item of subgroups) updateCount(item, "page");
       }
-      if (screenVisual) this.renderScreen();
+      if (generalVisual) this.renderGeneral();
+      else if (screenVisual) this.renderScreen();
       else if (visual) this.renderVisual();
       if (focus) this.layout.querySelector(focus)?.focus({ preventScroll:true });
     }
@@ -4150,6 +4259,7 @@ ${gridStyles}
       if (!button) return;
       const args = button.dataset;
       if (args.match !== undefined) { this.matchIntro(); return; }
+      if (this.generalAction(args)) return;
       if (this.screenAction(args)) return;
       if (this.visualAction(args)) return;
       if (args.view) {
@@ -4636,6 +4746,19 @@ ${gridStyles}
     }
 
     screenChange(event) {
+      // 0.8.44 · «General»: inverter model and card name.
+      const model = event.target.closest?.("[data-gen-model]");
+      if (model) {
+        this.commit({ ...this.config, [inverterField(Number(model.dataset.genModel), "inverter_model")]:String(model.value) });
+        return;
+      }
+      const cardName = event.target.closest?.("[data-gen-name]");
+      if (cardName) {
+        const next = { ...this.config }, value = String(cardName.value).trim().slice(0, 16);
+        if (value) next.card_name = value; else delete next.card_name;
+        this.commit(next);
+        return;
+      }
       const all = event.target.closest?.("[data-gall]");
       if (all && this.gridSel) {
         this.gridAllFields ??= new Set();
