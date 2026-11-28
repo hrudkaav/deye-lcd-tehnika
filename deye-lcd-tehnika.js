@@ -9,7 +9,7 @@
   const legacyCardTag = "deye-lcd-8k";
   if (customElements.get(cardTag)) return;
 
-  const version = "Alpha 0.8.44";
+  const version = "Alpha 0.8.45";
   const currentVersion = version.replace(/^[^\d]*/, "");
   const models = [3, 5, 6, 8, 10, 12, 15, 20, 30, 80, 160];
   const defaultModel = 8;
@@ -32,9 +32,26 @@
       { id:"battery-time", label:{ en:"Battery time", uk:"Час АКБ" },
         note:{ en:"A clock on the main screen: green — to full charge, orange — to the cut-off, grey — if the grid goes down.",
           uk:"Годинник на головному екрані: зелений — до повного заряду, помаранчевий — до порогу, сірий — якщо зникне мережа." } },
+      { id:"button-panel", label:{ en:"Button panel", uk:"Панель кнопок" },
+        note:{ en:"A strip under the screen opens a row of up to 5 cells. Cells are set in the card editor → «Panel».",
+          uk:"Смужка під екраном відкриває рядок до 5 клітинок. Клітинки налаштовуються в редакторі картки → «Панель»." } },
     ] },
   ];
   const workshopKey = "deye-lcd-tehnika:workshop";
+  // 0.8.45 · Button panel: up to 5 cells of any entity, drawn by its kind; every change asks first.
+  const panelCellsMax = 5;
+  const panelOpenKey = "deye-lcd-tehnika:panel-open";
+  const panelDomains = ["button", "input_button", "script", "scene", "switch", "input_boolean", "light", "fan", "number", "input_number", "select", "input_select", "sensor", "binary_sensor"];
+  const panelKind = (id) => {
+    const domain = String(id).split(".")[0];
+    if (["button", "input_button", "script", "scene"].includes(domain)) return "press";
+    if (["switch", "input_boolean", "light", "fan"].includes(domain)) return "toggle";
+    if (["number", "input_number"].includes(domain)) return "number";
+    if (["select", "input_select"].includes(domain)) return "select";
+    return "read";
+  };
+  const panelCells = (config) => (Array.isArray(config?.panel_cells) ? config.panel_cells : [])
+    .filter(cell => cell && typeof cell.entity === "string" && cell.entity.includes(".")).slice(0, panelCellsMax);
   const storedWorkshop = () => { try { const value = JSON.parse(localStorage.getItem(workshopKey) || "{}"); return value && typeof value === "object" ? value : {}; } catch { return {}; } };
   const workshopOptionIds = new Set(workshop.flatMap(entry => entry.options.map(option => option.id)));
   // One language switch for the card and its editor: the flags in «Т» and the editor field write the same browser value.
@@ -2906,6 +2923,43 @@
     .bat-time { transform:translate(var(--bt-shift, -17px), -29.5px); pointer-events:none; }
     :host([data-theme="technika"]) .bat-time { transform:translate(var(--bt-shift, -17px), 26.5px); }
     .bat-time[hidden] { display:none; }
+    /* 0.8.45 · Button panel under the screen (Workshop option). */
+    .bp { position:relative; margin-top:5px; }
+    .bp[hidden], .bp-row[hidden], .bp-dialog[hidden] { display:none; }
+    .screen[hidden] ~ .bp { display:none; }
+    .bp-handle { display:block; width:100%; height:16px; margin:0; padding:0; border:0; border-radius:6px; cursor:pointer;
+      background:var(--bp-face, #eef1f2); color:var(--bp-ink, #1d2a30); }
+    .bp-handle span { display:block; width:0; height:0; margin:auto; border-left:7px solid transparent; border-right:7px solid transparent; border-top:7px solid currentColor; }
+    .bp-handle[aria-expanded="true"] span { border-top:0; border-bottom:7px solid currentColor; }
+    .bp-row { display:grid; grid-template-columns:repeat(var(--bp-n,1), minmax(0,1fr)); gap:5px; margin-bottom:5px; }
+    .bp-cell { display:grid; gap:2px; align-content:center; justify-items:center; min-height:52px; padding:5px 4px; border-radius:6px; cursor:pointer;
+      border:1px solid var(--bp-edge, #c9d2d6); background:var(--bp-face, #eef1f2); color:var(--bp-ink, #1d2a30); font:inherit; font-family:var(--lcd-font); min-width:0; }
+    .bp-name { max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:11px; opacity:.8; }
+    .bp-value { max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:14px; font-weight:700; }
+    .bp-cell[data-on] { border-color:var(--bp-on, #2fbf6a); box-shadow:inset 0 0 0 1px var(--bp-on, #2fbf6a); }
+    .bp-cell[data-on] .bp-value { color:var(--bp-on, #2fbf6a); }
+    .bp-cell[data-kind="press"] .bp-value { font-size:12px; }
+    .bp-cell[data-missing] { opacity:.55; }
+    .bp[data-dir="up"] .bp-row { position:absolute; left:0; right:0; bottom:calc(100% + 4px); z-index:4; margin:0; padding:5px;
+      border-radius:8px; background:var(--bp-sheet, #0d1114e6); box-shadow:0 -4px 16px #0006; }
+    .bp[data-dir="up"] .bp-dialog { bottom:calc(100% + 76px); }
+    .bp-empty { grid-column:1 / -1; margin:0; padding:10px; text-align:center; font-size:12px; border:1px dashed var(--bp-edge, #c9d2d6); border-radius:6px; color:var(--bp-ink, #1d2a30); }
+    .bp-dialog { position:absolute; left:6px; right:6px; bottom:calc(100% + 6px); z-index:5; padding:10px; border-radius:10px;
+      background:var(--bp-dialog, #1d2428); color:#f1f5f6; box-shadow:0 6px 24px #0008; border:1px solid #f2b632; font-family:var(--lcd-font); }
+    .bp-q { margin:0 0 8px; font-size:14px; font-weight:600; text-align:center; }
+    .bp-actions { display:flex; gap:8px; justify-content:center; }
+    .bp-actions button, .bp-num button, .bp-options button { min-height:36px; padding:0 14px; border-radius:6px; border:1px solid #5b666b; background:#2b3337; color:inherit; font:inherit; cursor:pointer; }
+    .bp-actions .bp-ok { background:#2e9e4f; border-color:#2e9e4f; color:#fff; font-weight:700; }
+    .bp-num { display:flex; align-items:center; justify-content:center; gap:6px; margin-bottom:4px; }
+    .bp-num button { width:42px; padding:0; font-size:20px; }
+    .bp-num input { width:90px; height:36px; text-align:center; border-radius:6px; border:1px solid #5b666b; background:#11171a; color:inherit; font:inherit; font-size:18px; }
+    .bp-range { display:block; margin-bottom:8px; text-align:center; font-size:11px; opacity:.7; }
+    .bp-options { display:flex; flex-wrap:wrap; gap:6px; justify-content:center; margin-bottom:8px; }
+    .bp-options button[aria-pressed="true"] { border-color:#f2b632; color:#ffe9b0; }
+    :host([data-appearance="dark"]) { --bp-face:#1f2427; --bp-ink:#e8eef0; --bp-edge:#384247; }
+    :host([data-theme="technika"]) { --bp-face:#2a3125; --bp-ink:#e3ecd2; --bp-edge:#55623f; --bp-on:#8fe07a; }
+    :host([data-theme="technika"][data-palette="graphite"]) { --bp-face:#262c30; --bp-ink:#e4e9ec; --bp-edge:#4a555c; }
+    :host([data-look="3d"]) { --bp-face:#0f1a16e6; --bp-ink:#eafff0; --bp-edge:#3c8f5a; --bp-on:#7dff9c; }
     .bat-time text { font-size:9px; font-weight:700; fill:currentColor; }
     .bat-clock { fill:none; stroke:currentColor; stroke-width:1.1; stroke-linecap:round; transform:translateY(0); }
     .bat-time[data-dir="charge"] { color:#229d56; }
@@ -3979,6 +4033,13 @@ ${gridStyles}
           if (counter) counter.textContent = `${value.length} / 16`;
           return;
         }
+        const panelSearch = event.target.closest?.("[data-pn-search]");
+        if (panelSearch) {
+          this.panelSearch = panelSearch.value;
+          const list = this.layout.querySelector("[data-pn-list]");
+          if (list) list.innerHTML = this.panelPickList();
+          return;
+        }
         if (!this.screenInput(event)) this.visualInput(event);
       });
       this.layout.addEventListener("change", event => this.screenChange(event));
@@ -4100,6 +4161,104 @@ ${gridStyles}
       </div>`;
     }
 
+    panelPickList() {
+      const t = this.t.bind(this);
+      const states = this.hassData?.states ?? {};
+      const query = String(this.panelSearch ?? "").trim().toLowerCase().split(/\s+/).filter(Boolean);
+      const taken = new Set(panelCells(this.config).map(cell => cell.entity));
+      const list = Object.values(states).filter(entity => panelDomains.includes(entity.entity_id.split(".")[0]) && !taken.has(entity.entity_id))
+        .filter(entity => {
+          const text = `${entity.attributes?.friendly_name ?? ""} ${entity.entity_id}`.toLowerCase();
+          return query.every(word => text.includes(word));
+        })
+        .sort((a, b) => String(a.attributes?.friendly_name ?? a.entity_id).localeCompare(String(b.attributes?.friendly_name ?? b.entity_id)))
+        .slice(0, 40);
+      if (!list.length) return `<p class="v-empty">${escapeHtml(t("Nothing found. Try another word.", "Нічого не знайдено. Спробуйте інше слово."))}</p>`;
+      const kinds = { press:t("button", "кнопка"), toggle:t("switch", "перемикач"), number:t("number", "число"), select:t("choice", "вибір"), read:t("value", "значення") };
+      return list.map(entity => `<button type="button" class="v-pick" data-pn-pick="${escapeHtml(entity.entity_id)}">
+        <span><b>${escapeHtml(entity.attributes?.friendly_name ?? entity.entity_id)}</b><small>${escapeHtml(entity.entity_id)} · ${escapeHtml(kinds[panelKind(entity.entity_id)])}</small></span>
+        <em>${escapeHtml(`${String(entity.state).slice(0, 14)}${entity.attributes?.unit_of_measurement ? " " + entity.attributes.unit_of_measurement : ""}`)}</em></button>`).join("");
+    }
+
+    renderPanelEditor() {
+      const slot = this.layout.querySelector(".panel-slot");
+      if (!slot) return;
+      const t = this.t.bind(this);
+      const states = this.hassData?.states ?? {};
+      const cells = panelCells(this.config);
+      const kinds = { press:t("button", "кнопка"), toggle:t("switch", "перемикач"), number:t("number · window − / +", "число · вікно − / +"), select:t("choice from a list", "вибір зі списку"), read:t("value only", "лише значення") };
+      const rows = cells.map((cell, index) => {
+        const entity = states[cell.entity];
+        return `<div class="gn-block">
+          <div class="gn-title">${index + 1} · ${escapeHtml(entity?.attributes?.friendly_name ?? cell.entity)}
+            <span style="margin-left:auto;display:flex;gap:4px">
+              <button type="button" class="g-btn" data-pn="up:${index}" aria-label="${escapeHtml(t("Move left", "Посунути ліворуч"))}"${index === 0 ? " disabled" : ""}>‹</button>
+              <button type="button" class="g-btn" data-pn="down:${index}" aria-label="${escapeHtml(t("Move right", "Посунути праворуч"))}"${index === cells.length - 1 ? " disabled" : ""}>›</button>
+              <button type="button" class="g-btn" data-pn="del:${index}" aria-label="${escapeHtml(t("Remove", "Прибрати"))}">×</button></span></div>
+          <p class="gn-label">${escapeHtml(`${cell.entity} · ${kinds[panelKind(cell.entity)]}`)}${entity ? "" : ` · ${escapeHtml(t("not found in Home Assistant", "не знайдено в Home Assistant"))}`}</p>
+          <div class="gn-row"><label for="pn-name-${index}">${escapeHtml(t("Short name", "Коротка назва"))}</label>
+            <input type="text" id="pn-name-${index}" maxlength="14" data-pn-name="${index}" value="${escapeHtml(typeof cell.name === "string" ? cell.name : "")}" placeholder="${escapeHtml(t("from the entity", "з назви сутності"))}"></div>
+        </div>`;
+      }).join("");
+      const picker = this.panelPicking ? `<section class="v-sheet" aria-label="${escapeHtml(t("Choose an entity", "Вибір сутності"))}">
+          <div class="v-sheet-head"><div><h3>${escapeHtml(t(`Cell ${cells.length + 1}`, `Клітинка ${cells.length + 1}`))}</h3>
+          <small class="v-step">${escapeHtml(t("Buttons, switches, numbers, choices and sensors", "Кнопки, перемикачі, числа, вибір і сенсори"))}</small></div></div>
+          <input type="search" data-pn-search value="${escapeHtml(this.panelSearch ?? "")}" placeholder="${escapeHtml(t("Search entity…", "Пошук сутності…"))}" aria-label="${escapeHtml(t("Search entity", "Пошук сутності"))}">
+          <div class="v-list" data-pn-list>${this.panelPickList()}</div>
+          <div class="actions v-nav2"><button type="button" data-pn="cancel">${escapeHtml(t("Close", "Закрити"))}</button></div>
+        </section>` : "";
+      const dark = this.hassData?.themes?.darkMode === true;
+      slot.innerHTML = `<div class="g-ed${dark ? " dark" : ""}">
+        <header class="g-head"><h2>${escapeHtml(t("Button panel", "Панель кнопок"))}</h2><em>${cells.length} / ${panelCellsMax}</em></header>
+        <div class="gn-body">
+          <section class="gn-block">
+            <div class="gn-title">${escapeHtml(t("OPENS", "РОЗКРИВАЄТЬСЯ"))}</div>
+            <div class="gn-tiles" style="--n:2">
+              <button type="button" class="gn-tile" data-pn="dir:up" aria-pressed="${this.config.panel_direction !== "down"}"><b>▲</b>${escapeHtml(t("over the card — height stays", "поверх картки — висота не міняється"))}</button>
+              <button type="button" class="gn-tile" data-pn="dir:down" aria-pressed="${this.config.panel_direction === "down"}"><b>▼</b>${escapeHtml(t("below — the card grows", "вниз — картка стає вищою"))}</button>
+            </div>
+          </section>
+          <p class="gn-note" style="margin:0">${escapeHtml(t("The panel appears under the card screen after «T» → «Workshop» → «Button panel» is switched on (on each device). Every change from the panel asks for confirmation.",
+            "Панель з'являється під екраном картки, коли ввімкнено «Т» → «Майстерня» → «Панель кнопок» (на кожному пристрої). Кожна зміна з панелі питає підтвердження."))}</p>
+          ${rows}
+          ${cells.length < panelCellsMax && !this.panelPicking ? `<button type="button" class="gn-tile" data-pn="add" style="min-height:52px"><b>+</b>${escapeHtml(t("Add a cell", "Додати клітинку"))}</button>` : ""}
+          ${picker}
+        </div>
+      </div>`;
+      if (this.panelPicking) this.layout.querySelector("[data-pn-search]")?.focus({ preventScroll:true });
+    }
+
+    panelAction(args) {
+      if (this.tab !== "panel") return false;
+      if (args.pnPick !== undefined) {
+        const cells = panelCells(this.config).map(cell => ({ ...cell }));
+        if (cells.length < panelCellsMax) cells.push({ entity:args.pnPick });
+        this.panelPicking = false; this.panelSearch = "";
+        this.commit({ ...this.config, panel_cells:cells });
+        return true;
+      }
+      if (args.pn === undefined) return false;
+      const [act, raw] = String(args.pn).split(":");
+      const index = Number(raw);
+      if (act === "add") { this.panelPicking = true; this.panelSearch = ""; this.renderPanelEditor(); return true; }
+      if (act === "cancel") { this.panelPicking = false; this.renderPanelEditor(); return true; }
+      if (act === "dir") {
+        const next = { ...this.config };
+        if (raw === "down") next.panel_direction = "down"; else delete next.panel_direction;
+        this.commit(next);
+        return true;
+      }
+      const cells = panelCells(this.config).map(cell => ({ ...cell }));
+      if (!cells[index]) return true;
+      if (act === "del") cells.splice(index, 1);
+      else if (act === "up" && index > 0) [cells[index - 1], cells[index]] = [cells[index], cells[index - 1]];
+      else if (act === "down" && index < cells.length - 1) [cells[index + 1], cells[index]] = [cells[index], cells[index + 1]];
+      const next = { ...this.config };
+      if (cells.length) next.panel_cells = cells; else delete next.panel_cells;
+      this.commit(next);
+      return true;
+    }
+
     generalAction(args) {
       if (this.tab !== "general") return false;
       if (args.genHelp !== undefined) {
@@ -4157,6 +4316,7 @@ ${gridStyles}
       const screenVisual = this.tab === "screen" && this.screenView !== "list";
       const visual = this.tab === "menus" && this.menuView !== "list" || screenVisual;
       const generalVisual = this.tab === "general";
+      const panelVisual = this.tab === "panel";
       const periodPage = !visual && this.tab === "menus" && active?.name === "menu_work_1";
       const groupSchema = periodPage ? active.schema.filter(field =>
         !/^tou_[1-6]_/.test(field.name) || field.name.startsWith(`tou_${this.activePeriod}_`))
@@ -4164,7 +4324,7 @@ ${gridStyles}
       const direct = section.schema.filter(item => !item.schema);
       const mainGrid = this.tab === "screen" && direct.length > 1 && /_(pv|grid|load|battery)$/.test(section.name);
       const grid = (name, fields) => ({ name, type:"grid", flatten:true, schema:fields, column_min_width:"128px" });
-      const fields = visual || generalVisual ? [] : [
+      const fields = visual || generalVisual || panelVisual ? [] : [
         ...(mainGrid ? [grid("editor_main_fields", direct)] : direct),
         ...(this.tab === "screen" && groupSchema.length
           ? [grid("editor_page_fields", groupSchema)] : groupSchema),
@@ -4186,7 +4346,7 @@ ${gridStyles}
           `<button type="button" data-${kind}="${escapeHtml(value)}" aria-pressed="${selected}">${escapeHtml(caption)}${extra}</button>`;
         const tabs = [
           ["general", t("General", "Загальне")], ["screen", t("Main screen", "Головний екран")],
-          ["menus", t("Inverter menus", "Меню інвертора")],
+          ["menus", t("Inverter menus", "Меню інвертора")], ["panel", t("Panel", "Панель")],
         ];
         const toolbar = this.tab === "screen" ? `<div class="toolbar"><div class="devices" aria-label="${t("Inverters", "Інвертори")}">
           ${installedInverters(config).map(index => button("inverter", index,
@@ -4194,10 +4354,10 @@ ${gridStyles}
               : t(`Inverter ${index+1}`, `Інвертор ${index+1}`), index===this.inverterIndex,
             `<small>${escapeHtml(modelText(readModel(config[inverterField(index, "inverter_model")], inverterTotal>1), config))}</small>`)).join("")}
           </div><button type="button" data-match>${t("Auto", "Авто")}</button></div>` : "";
-        const sidebar = this.tab === "general" || visual ? "" : `<nav class="side" aria-label="${t("Sections", "Розділи")}">
+        const sidebar = this.tab === "general" || this.tab === "panel" || visual ? "" : `<nav class="side" aria-label="${t("Sections", "Розділи")}">
           ${sections.map(item => button("section", item.name, item.title, item===section,
             this.tab === "screen" ? '<span class="count" aria-hidden="true"></span>' : "")).join("")}</nav>`;
-        const label = this.tab === "general" ? t("General", "Загальне") : screenVisual ? t("Main screen", "Головний екран") : visual ? t("Inverter menus", "Меню інвертора") : section.title;
+        const label = this.tab === "panel" ? t("Panel", "Панель") : this.tab === "general" ? t("General", "Загальне") : screenVisual ? t("Main screen", "Головний екран") : visual ? t("Inverter menus", "Меню інвертора") : section.title;
         const pageTitle = (item) => {
           const phase = /_l([123])$/.exec(item.name);
           if (phase) return t(`L${phase[1]}`, `Ф${phase[1]}`);
@@ -4220,8 +4380,8 @@ ${gridStyles}
             ${button("view", "visual", t("Menu", "Меню"), visual)}${button("view", "list", t("List", "Список"), !visual)}</div>` : ""}
           ${this.tab === "screen" ? `<div class="view-toggle" role="group" aria-label="${t("Editor view", "Вигляд редактора")}"><span>${t("View:", "Вигляд:")}</span>
             ${button("view", "visual", t("Screen", "Екран"), screenVisual)}${button("view", "list", t("List", "Список"), !screenVisual)}</div>` : ""}
-          ${pageButtons}${periodButtons}${!visual && hasEntities ? `<label class="list-all"><input type="checkbox" data-listall${unfiltered ? " checked" : ""}><span>${escapeHtml(t("All entities, no filters", "Усі сутності, без фільтрів"))}</span></label>` : ""}${generalVisual ? '<div class="general-slot"></div>' : visual ? '<div class="visual-slot"></div>' : '<div class="form-slot"></div>'}</section></div>`;
-        if (!visual && !generalVisual) this.layout.querySelector(".form-slot").append(this.form);
+          ${pageButtons}${periodButtons}${!visual && hasEntities ? `<label class="list-all"><input type="checkbox" data-listall${unfiltered ? " checked" : ""}><span>${escapeHtml(t("All entities, no filters", "Усі сутності, без фільтрів"))}</span></label>` : ""}${panelVisual ? '<div class="panel-slot"></div>' : generalVisual ? '<div class="general-slot"></div>' : visual ? '<div class="visual-slot"></div>' : '<div class="form-slot"></div>'}</section></div>`;
+        if (!visual && !generalVisual && !panelVisual) this.layout.querySelector(".form-slot").append(this.form);
         Object.assign(this.form, { schema:fields, computeLabel, computeHelper });
         this.visibleFields = fields.flatMap(editorLeaves);
       }
@@ -4248,7 +4408,8 @@ ${gridStyles}
         for (const item of sections) updateCount(item, "section");
         for (const item of subgroups) updateCount(item, "page");
       }
-      if (generalVisual) this.renderGeneral();
+      if (panelVisual) this.renderPanelEditor();
+      else if (generalVisual) this.renderGeneral();
       else if (screenVisual) this.renderScreen();
       else if (visual) this.renderVisual();
       if (focus) this.layout.querySelector(focus)?.focus({ preventScroll:true });
@@ -4260,6 +4421,7 @@ ${gridStyles}
       const args = button.dataset;
       if (args.match !== undefined) { this.matchIntro(); return; }
       if (this.generalAction(args)) return;
+      if (this.panelAction(args)) return;
       if (this.screenAction(args)) return;
       if (this.visualAction(args)) return;
       if (args.view) {
@@ -4747,6 +4909,16 @@ ${gridStyles}
 
     screenChange(event) {
       // 0.8.44 · «General»: inverter model and card name.
+      const cellName = event.target.closest?.("[data-pn-name]");
+      if (cellName) {
+        const cells = panelCells(this.config).map(cell => ({ ...cell }));
+        const index = Number(cellName.dataset.pnName);
+        if (!cells[index]) return;
+        const value = String(cellName.value).trim().slice(0, 14);
+        if (value) cells[index].name = value; else delete cells[index].name;
+        this.commit({ ...this.config, panel_cells:cells });
+        return;
+      }
       const model = event.target.closest?.("[data-gen-model]");
       if (model) {
         this.commit({ ...this.config, [inverterField(Number(model.dataset.genModel), "inverter_model")]:String(model.value) });
@@ -5487,6 +5659,11 @@ ${gridStyles}
           ${microMarkup()}
           <text class="card-name" x="202" y="42" text-anchor="middle" data-card-name></text>
         </svg>
+        <div class="bp" data-bp hidden>
+          <div class="bp-dialog" data-bp-dialog role="dialog" hidden></div>
+          <div class="bp-row" data-bp-row hidden></div>
+          <button type="button" class="bp-handle" data-bp-handle aria-expanded="false" aria-label="Панель кнопок"><span aria-hidden="true"></span></button>
+        </div>
         ${detailsMarkup()}
         ${settingsMarkup()}
         <div data-about-slot></div>
@@ -5562,6 +5739,25 @@ ${gridStyles}
       this.cardName = select("[data-card-name]");
       onActivate(this.generatorGroup, () => this.openDetails("generator_power"));
       onActivate(this.microGroup, () => this.openDetails("micro_power"));
+      this.panel = select("[data-bp]");
+      this.panelRow = select("[data-bp-row]");
+      this.panelHandle = select("[data-bp-handle]");
+      this.panelDialog = select("[data-bp-dialog]");
+      this.panelHandle.addEventListener("click", () => {
+        const open = this.panelRow.hasAttribute("hidden");
+        try { localStorage.setItem(panelOpenKey, open ? "1" : "0"); } catch { /* this page only */ }
+        this.panelDialogState = null;
+        this.updatePanel(true);
+      });
+      this.panelRow.addEventListener("click", event => {
+        const cell = event.target.closest("[data-bp-cell]");
+        if (cell) this.panelTap(Number(cell.dataset.bpCell));
+      });
+      this.panelDialog.addEventListener("click", event => this.panelDialogClick(event));
+      this.panelDialog.addEventListener("input", event => {
+        const input = event.target.closest("[data-bp-value]");
+        if (input && this.panelDialogState) this.panelDialogState.value = input.value;
+      });
       this.detailsScreen = select(".details-screen");
       this.detailsTitle = select("#details-title");
       this.detailsBody = select("[data-details-body]");
@@ -5810,6 +6006,7 @@ ${gridStyles}
       for (const value of Object.values(this.config ?? {})) {
         if (typeof value === "string" && /^[a-z_]+\.[a-z0-9_]+$/.test(value)) ids.add(value);
       }
+      for (const cell of panelCells(this.config)) ids.add(cell.entity);
       this.watchedConfig = this.config;
       this.watchedIds = [...ids];
       return this.watchedIds;
@@ -7364,6 +7561,147 @@ ${gridStyles}
       }
     }
 
+    panelOn() { return (this.dataset.workshop || "").split(" ").includes("button-panel"); }
+
+    updatePanel(force = false) {
+      if (!this.panel) return;
+      const on = this.panelOn();
+      this.panel.toggleAttribute("hidden", !on);
+      if (!on) return;
+      // «up» opens over the card (its height never changes), «down» opens under it.
+      this.panel.dataset.dir = this.config?.panel_direction === "down" ? "down" : "up";
+      let open = false;
+      try { open = localStorage.getItem(panelOpenKey) === "1"; } catch { open = false; }
+      this.panelRow.toggleAttribute("hidden", !open);
+      this.panelHandle.setAttribute("aria-expanded", String(open));
+      const t = this.t.bind(this);
+      const states = this.hassData?.states ?? {};
+      const cells = panelCells(this.config);
+      if (!open) { this.panelDialog.hidden = true; return; }
+      const html = cells.length ? cells.map((cell, index) => {
+        const entity = states[cell.entity];
+        const kind = panelKind(cell.entity);
+        const name = (typeof cell.name === "string" && cell.name.trim()) || entity?.attributes?.friendly_name || cell.entity;
+        const unit = entity?.attributes?.unit_of_measurement ?? "";
+        const state = entity ? String(entity.state) : "—";
+        const missing = !entity || ["unavailable", "unknown"].includes(state);
+        const value = missing ? "—" : kind === "toggle" ? (state === "on" ? t("On", "Увімк.") : t("Off", "Вимк."))
+          : kind === "press" ? t("Press", "Натиснути") : `${state}${unit ? ` ${unit}` : ""}`;
+        const active = kind === "toggle" && state === "on";
+        return `<button type="button" class="bp-cell" data-bp-cell="${index}" data-kind="${kind}"${active ? " data-on" : ""}${missing ? " data-missing" : ""}>
+          <span class="bp-name">${escapeHtml(name)}</span><b class="bp-value">${escapeHtml(value)}</b></button>`;
+      }).join("") : `<p class="bp-empty">${escapeHtml(t("Add cells in the card editor → «Panel».", "Додайте клітинки в редакторі картки → «Панель»."))}</p>`;
+      this.panelRow.style.setProperty("--bp-n", String(Math.max(1, cells.length)));
+      if (force || this.panelHtml !== html) { this.panelHtml = html; this.panelRow.innerHTML = html; }
+      this.renderPanelDialog();
+    }
+
+    panelTap(index) {
+      const cell = panelCells(this.config)[index];
+      if (!cell) return;
+      const entity = this.hassData?.states?.[cell.entity];
+      const kind = panelKind(cell.entity);
+      if (kind === "read" || !entity) {
+        // Read-only: Home Assistant's own info window with the history.
+        this.dispatchEvent(new CustomEvent("hass-more-info", { detail:{ entityId:cell.entity }, bubbles:true, composed:true }));
+        return;
+      }
+      this.panelDialogState = { index, step:kind === "press" || kind === "toggle" ? "confirm" : "edit", value:entity.state };
+      this.renderPanelDialog();
+    }
+
+    renderPanelDialog() {
+      const state = this.panelDialogState;
+      const cell = state ? panelCells(this.config)[state.index] : null;
+      const entity = cell ? this.hassData?.states?.[cell.entity] : null;
+      if (!state || !cell || !entity) { this.panelDialog.hidden = true; this.panelDialog.innerHTML = ""; return; }
+      const t = this.t.bind(this);
+      const kind = panelKind(cell.entity);
+      const name = (typeof cell.name === "string" && cell.name.trim()) || entity.attributes?.friendly_name || cell.entity;
+      const unit = entity.attributes?.unit_of_measurement ?? "";
+      const buttons = (ok) => `<div class="bp-actions"><button type="button" data-bp-act="cancel">${escapeHtml(t("Cancel", "Скасувати"))}</button>
+        <button type="button" class="bp-ok" data-bp-act="${ok}">${escapeHtml(ok === "yes" ? t("Yes", "Так") : t("Apply", "Застосувати"))}</button></div>`;
+      let body = "";
+      if (state.step === "confirm") {
+        const question = kind === "press" ? t(`Run «${name}»?`, `Виконати «${name}»?`)
+          : kind === "toggle" ? (entity.state === "on" ? t(`Turn off «${name}»?`, `Вимкнути «${name}»?`) : t(`Turn on «${name}»?`, `Увімкнути «${name}»?`))
+          : t(`Change «${name}»: ${entity.state} → ${state.value}${unit ? ` ${unit}` : ""}?`, `Змінити «${name}»: ${entity.state} → ${state.value}${unit ? ` ${unit}` : ""}?`);
+        body = `<p class="bp-q">${escapeHtml(question)}</p>${buttons("yes")}`;
+      } else if (kind === "number") {
+        const min = Number(entity.attributes?.min), max = Number(entity.attributes?.max), step = Number(entity.attributes?.step) || 1;
+        body = `<p class="bp-q">${escapeHtml(name)}</p>
+          <div class="bp-num"><button type="button" data-bp-act="minus" aria-label="−">−</button>
+          <input type="number" inputmode="decimal" data-bp-value value="${escapeHtml(String(state.value))}" step="${step}"${Number.isFinite(min) ? ` min="${min}"` : ""}${Number.isFinite(max) ? ` max="${max}"` : ""}>
+          <span>${escapeHtml(unit)}</span><button type="button" data-bp-act="plus" aria-label="+">+</button></div>
+          ${Number.isFinite(min) && Number.isFinite(max) ? `<small class="bp-range">${escapeHtml(`${min} … ${max}${unit ? ` ${unit}` : ""}`)}</small>` : ""}${buttons("apply")}`;
+      } else if (kind === "select") {
+        const options = Array.isArray(entity.attributes?.options) ? entity.attributes.options : [];
+        body = `<p class="bp-q">${escapeHtml(name)}</p><div class="bp-options">${options.map(option =>
+          `<button type="button" data-bp-option="${escapeHtml(String(option))}"${String(option) === String(state.value) ? ' aria-pressed="true"' : ""}>${escapeHtml(String(option))}</button>`).join("")}</div>
+          <div class="bp-actions"><button type="button" data-bp-act="cancel">${escapeHtml(t("Cancel", "Скасувати"))}</button></div>`;
+      }
+      this.panelDialog.innerHTML = body;
+      this.panelDialog.hidden = false;
+    }
+
+    async panelDialogClick(event) {
+      const state = this.panelDialogState;
+      if (!state) return;
+      const cell = panelCells(this.config)[state.index];
+      const entity = cell ? this.hassData?.states?.[cell.entity] : null;
+      if (!cell || !entity) { this.panelDialogState = null; this.renderPanelDialog(); return; }
+      const option = event.target.closest("[data-bp-option]");
+      if (option) {
+        if (option.dataset.bpOption === entity.state) { this.panelDialogState = null; this.renderPanelDialog(); return; }
+        Object.assign(state, { value:option.dataset.bpOption, step:"confirm" });
+        this.renderPanelDialog();
+        return;
+      }
+      const act = event.target.closest("[data-bp-act]")?.dataset.bpAct;
+      if (!act) return;
+      if (act === "cancel") { this.panelDialogState = null; this.renderPanelDialog(); return; }
+      if (act === "minus" || act === "plus") {
+        const step = Number(entity.attributes?.step) || 1;
+        const min = Number(entity.attributes?.min), max = Number(entity.attributes?.max);
+        let value = (Number(state.value) || 0) + (act === "plus" ? step : -step);
+        if (Number.isFinite(min)) value = Math.max(min, value);
+        if (Number.isFinite(max)) value = Math.min(max, value);
+        state.value = String(Math.round(value / step) * step === value ? value : Number(value.toFixed(4)));
+        this.renderPanelDialog();
+        return;
+      }
+      if (act === "apply") {
+        const value = Number(String(state.value).replace(",", "."));
+        if (!Number.isFinite(value) || String(value) === String(Number(entity.state))) { this.panelDialogState = null; this.renderPanelDialog(); return; }
+        Object.assign(state, { value:String(value), step:"confirm" });
+        this.renderPanelDialog();
+        return;
+      }
+      if (act !== "yes") return;
+      const domain = cell.entity.split(".")[0];
+      const kind = panelKind(cell.entity);
+      const target = { entity_id:cell.entity };
+      this.panelDialogState = null;
+      this.renderPanelDialog();
+      try {
+        if (kind === "press") {
+          const service = domain === "button" || domain === "input_button" ? "press" : "turn_on";
+          await this.hassData.callService(domain, service, {}, target);
+        } else if (kind === "toggle") {
+          await this.hassData.callService(domain, entity.state === "on" ? "turn_off" : "turn_on", {}, target);
+        } else if (kind === "number") {
+          await this.hassData.callService(domain, "set_value", { value:Number(state.value) }, target);
+        } else if (kind === "select") {
+          await this.hassData.callService(domain, "select_option", { option:state.value }, target);
+        }
+      } catch (error) {
+        this.panelDialog.innerHTML = `<p class="bp-q">${escapeHtml(this.t("Could not change it. Try again.", "Не вдалося змінити. Спробуйте ще раз."))}</p>
+          <div class="bp-actions"><button type="button" data-bp-act="cancel">OK</button></div>`;
+        this.panelDialogState = { index:state.index, step:"error", value:state.value };
+        this.panelDialog.hidden = false;
+      }
+    }
+
     updateBatteryTime(states, battery) {
       // 0.8.37 · «⏱ 2г 45хв»: time to 100 % while charging, to the cut-off while discharging; hidden at rest.
       if (!this.batTime) return;
@@ -7440,6 +7778,7 @@ ${gridStyles}
       this.setGauge("pv_power", pv);
       this.updateCharge(states);
       this.updateBatteryTime(states, battery);
+      this.updatePanel();
       this.toggleAttribute("data-grid-off", gridDisconnected);
       this.gridOff3d = gridDisconnected;
       this.update3d();
